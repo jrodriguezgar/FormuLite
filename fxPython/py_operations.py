@@ -1,0 +1,691 @@
+import json
+from typing import Iterable, Callable, Any, Union, List, Tuple, Set, Sequence, Hashable
+import sys
+from collections.abc import Iterable
+
+import subprocess
+from typing import Union, Tuple
+
+import operator
+
+
+def merge_json_strings(json_str_1: str, json_str_2: str) -> str:
+    """Merges two JSON strings (representing JSON objects) into a new JSON string.
+
+    If both JSONs contain the same keys, the values from the second JSON (json_str_2)
+    will overwrite the values from the first (json_str_1).
+
+    Args:
+        json_str_1 (str): The first JSON string to merge (must represent a JSON object).
+        json_str_2 (str): The second JSON string to merge (must represent a JSON object).
+
+    Returns:
+        str: A new JSON string representing the merged object.
+
+    Raises:
+        json.JSONDecodeError: If either input string is not a valid JSON.
+        TypeError: If either input string does not represent a JSON object (dictionary).
+
+    Example of use:
+        >>> merge_json_strings('{"name": "Alice", "age": 30}', '{"age": 31, "city": "New York"}')
+        '{"name": "Alice", "age": 31, "city": "New York"}'
+        >>> merge_json_strings('{"a": 1}', '{"b": 2}')
+        '{"a": 1, "b": 2}'
+    """
+    try:
+        # Convert the JSON strings to Python objects (dictionaries).
+        obj_1 = json.loads(json_str_1)
+        obj_2 = json.loads(json_str_2)
+    except json.JSONDecodeError as e:
+        # Re-raise with a more informative message if JSON decoding fails.
+        raise json.JSONDecodeError(
+            f"Error decoding input JSON: {e.msg}", e.doc, e.pos
+        ) from e
+
+    # Validate that both decoded objects are dictionaries.
+    if not isinstance(obj_1, dict):
+        raise TypeError(
+            f"The first JSON does not represent an object (dictionary), but a {type(obj_1).__name__}."
+        )
+    if not isinstance(obj_2, dict):
+        raise TypeError(
+            f"The second JSON does not represent an object (dictionary), but a {type(obj_2).__name__}."
+        )
+
+    # Merge the two dictionaries.
+    # The .copy() method is used to avoid modifying obj_1 directly.
+    # The .update() method merges obj_2 into merged_obj, overwriting duplicate keys.
+    merged_obj = obj_1.copy()
+    merged_obj.update(obj_2)
+    # Alternatively, in Python 3.9+, you could use the dictionary union operator:
+    # merged_obj = obj_1 | obj_2
+
+    # Convert the merged Python object back to a JSON string.
+    # `ensure_ascii=False` is used to correctly handle non-ASCII characters in the output.
+    return json.dumps(merged_obj, ensure_ascii=False)
+
+
+def add_to_tuple(p_tuple: Tuple[Any, ...], p_value: Any) -> Tuple[Any, ...]:
+    """Adds an element to the end of a tuple.
+
+    Since tuples are immutable, this function creates and returns a *new* tuple
+    that contains all elements from the original tuple plus the new value appended
+    to the end.
+
+    Args:
+        p_tuple (Tuple[Any, ...]): The original tuple to which the element will be added.
+        p_value (Any): The new value to append to the tuple.
+
+    Returns:
+        Tuple[Any, ...]: A new tuple with the value appended at the end.
+
+    Example of use:
+        >>> add_to_tuple((1, 2), 3)
+        (1, 2, 3)
+        >>> add_to_tuple((), "hello")
+        ('hello',)
+    """
+    # The '*' operator (unpacking) expands the elements of p_tuple,
+    # and p_value is added as the last element of the new tuple.
+    # This is the most concise and Pythonic way to achieve this.
+    return (*p_tuple, p_value)
+
+
+def unique_list(p_list: List[Any]) -> List[Any]:
+    """Returns a new list containing only the unique elements from the original list.
+
+    The order of elements in the resulting list is not guaranteed, as a set
+    is used internally for deduplication.
+
+    Args:
+        p_list (List[Any]): The input list which may contain duplicate elements.
+
+    Returns:
+        List[Any]: A new list containing all unique elements from the input list.
+
+    Example of use:
+        >>> unique_list([1, 2, 2, 3, 1])
+        [1, 2, 3] # Order may vary
+        >>> unique_list(["apple", "banana", "apple"])
+        ['banana', 'apple'] # Order may vary
+    """
+    # Convert the list to a set to remove duplicates. Sets inherently do not allow duplicate elements.
+    # Then, convert the set back to a list.
+    return list(set(p_list))
+
+
+def unique_tuple_list(p_list: list[tuple]) -> list[tuple]:
+    """
+    Removes duplicate tuples from a list based on the first element of each tuple.
+    Returns a new list containing only the unique tuples.
+
+    Args:
+        p_list (list[tuple]): The input list of tuples. Each tuple must have at least one element.
+
+    Returns:
+        list[tuple]: A new list containing the unique tuples, maintaining the order
+                     of their first appearance in the original list.
+
+    Example usage:
+        my_tuples = [(1, 'apple'), (2, 'banana'), (1, 'orange'), (3, 'grape'), (2, 'kiwi')]
+        unique_list = unique_tuple_list(my_tuples)
+        # unique_list will be [(1, 'apple'), (2, 'banana'), (3, 'grape')]
+        # Cost: O(n) on average, where n is the number of tuples in p_list,
+        # due to set lookups and list appends.
+    """
+    # Use a set to keep track of the first elements (keys) that have already been seen.
+    # Sets provide O(1) average-case time complexity for 'in' operations and additions,
+    # which is crucial for efficient duplicate checking.
+    seen_keys = set()
+    
+    # This list will store the filtered unique tuples, preserving order.
+    filtered_list = []
+
+    for current_tuple in p_list:
+        # The key for uniqueness is the first element of the tuple.
+        key = current_tuple[0]
+        
+        # Check if this key has been encountered before.
+        if key not in seen_keys:
+            # If the key is new, add it to the set of seen keys.
+            seen_keys.add(key)
+            # And append the entire tuple to our filtered list.
+            # We add the entire tuple because the requirement is to return the unique tuple.
+            filtered_list.append(current_tuple)
+
+    return filtered_list
+
+
+def flatten_list(p_list: list[list]) -> list:
+    """
+    Flattens a list of lists into a single, one-dimensional list.
+
+    This function uses a list comprehension for a concise and efficient
+    way to iterate over sublists and their elements.
+
+    Args:
+        p_list (list[list]): The input list of lists. Each sublist can contain
+                             any type of elements.
+
+    Returns:
+        list: A new list containing all elements from the sublists in the order
+              they appeared.
+
+    Example usage:
+        my_nested_list = [[1, 2, 3], [4, 5], [6, 7, 8, 9]]
+        flattened_result = flatten_list(my_nested_list)
+        # flattened_result will be [1, 2, 3, 4, 5, 6, 7, 8, 9]
+        # Cost: O(n), where n is the total number of elements across all sublists,
+        # as each element is processed once.
+    """
+    # Use a list comprehension to iterate through each sublist in p_list
+    # and then iterate through each element within that sublist.
+    # This efficiently collects all elements into a new, flat list.
+    flattened = [element for sublist in p_list for element in sublist]
+    
+    return flattened
+
+
+def list_intersection(p_list1: list, p_list2: list) -> set:
+    """
+    Finds the intersection of two lists, returning a set of common elements.
+    It first filters out any falsy values (e.g., None, 0, '') from the input lists.
+
+    Args:
+        p_list1 (list): The first input list.
+        p_list2 (list): The second input list.
+
+    Returns:
+        set: A set containing elements that are present in both filtered lists.
+
+    Example usage:
+        list_a = [1, 2, None, 3, 4, 0, 5]
+        list_b = [3, 4, 5, 6, '', 7]
+        common_elements = list_intersection(list_a, list_b)
+        # common_elements will be {3, 4, 5}
+        # Cost: O(n + m) on average, where n and m are the lengths of p_list1 and p_list2,
+        # due to list comprehensions and set conversions/intersection.
+    """
+    # Filter out falsy values from both input lists.
+    # A list comprehension is used for clarity and efficiency in creating new lists
+    # that only contain truthy elements.
+    filtered_list1 = [item for item in p_list1 if item]
+    filtered_list2 = [item for item in p_list2 if item]
+
+    # Convert the filtered lists to sets.
+    # This is done because set operations (like intersection) are highly optimized
+    # for O(1) average-case time complexity per element, making the intersection
+    # much faster than iterating through lists.
+    set1 = set(filtered_list1)
+    set2 = set(filtered_list2)
+
+    # Return the intersection of the two sets.
+    # The intersection method returns a new set with elements common to both sets.
+    return set1.intersection(set2)
+
+
+def list_has_list(container_list: list, search_list: list) -> bool:
+    """Checks if all elements from one list exist in another list, regardless of order.
+
+    Problem/User Need: When comparing lists, it's often necessary to verify if all 
+    elements from one list exist in another list, without considering their order 
+    or position.
+
+    Args:
+        container_list (list): The larger list to search within.
+        search_list (list): The list whose elements we want to find.
+
+    Returns:
+        bool: True if all elements in search_list exist in container_list,
+              False otherwise.
+
+    Raises:
+        TypeError: If either argument is not a list.
+        ValueError: If either list is empty.
+
+    Example:
+        >>> list_has_list(['a', 'b', 'c', 'd'], ['b', 'c'])
+        True
+        >>> list_has_list(['a', 'b', 'c'], ['b', 'd'])
+        False
+        >>> list_has_list([1, 2, 3, 4], [2, 1])
+        True
+        >>> list_has_list([], [1, 2])
+        ValueError: Lists cannot be empty
+    
+    Cost:
+        Time complexity: O(n * m) where n and m are the lengths of the lists
+        Space complexity: O(1) as we only use set operations
+    """
+    # Input validation
+    if not isinstance(container_list, list) or not isinstance(search_list, list):
+        raise TypeError("Both arguments must be lists")
+    
+    if not container_list or not search_list:
+        raise ValueError("Lists cannot be empty")
+
+    # Convert container_list to set for O(1) lookup
+    container_set = set(container_list)
+    
+    # Check if each element in search_list exists in container_set
+    return all(item in container_set for item in search_list)
+
+
+def is_subsequence(sub_sequence: Sequence[Hashable], main_sequence: Sequence[Hashable]) -> bool:
+    """
+    Checks if 'sub_sequence' is a subsequence of 'main_sequence', maintaining the order of elements.
+
+    This function works correctly for ordered sequence types like lists and tuples.
+    It does not logically apply to unordered collections like sets, as the concept of
+    "order" is not defined for them. If you need to check element presence
+    without regard to order in sets, consider checking if one set is a subset of another.
+
+    Args:
+        sub_sequence: The potential subsequence (e.g., a list or a tuple).
+        main_sequence: The main sequence to check against (e.g., a list or a tuple).
+                       Elements within the sequences should be hashable for efficient
+                       searching if the underlying implementation uses hashing.
+
+    Returns:
+        True if 'sub_sequence' is a subsequence of 'main_sequence', False otherwise.
+
+    # --- Examples with Lists ---
+    list1_sub = ["apple", "banana"]
+    list1_main = ["orange", "apple", "grape", "banana", "kiwi"]
+    print(f"Is {list1_sub} a subsequence of {list1_main}? {is_subsequence(list1_sub, list1_main)}") # Expected: True
+
+    list2_sub = ["banana", "apple"]
+    list2_main = ["orange", "apple", "grape", "banana", "kiwi"]
+    print(f"Is {list2_sub} a subsequence of {list2_main}? {is_subsequence(list2_sub, list2_main)}") # Expected: False (order matters)
+
+    list3_sub = ["apple", "kiwi", "melon"]
+    list3_main = ["orange", "apple", "grape", "banana", "kiwi"]
+    print(f"Is {list3_sub} a subsequence of {list3_main}? {is_subsequence(list3_sub, list3_main)}") # Expected: False (melon not found)
+
+    # --- Examples with Tuples ---
+    tuple1_sub = (1, 3)
+    tuple1_main = (0, 1, 2, 3, 4, 5)
+    print(f"Is {tuple1_sub} a subsequence of {tuple1_main}? {is_subsequence(tuple1_sub, tuple1_main)}") # Expected: True
+
+    tuple2_sub = ('b', 'a')
+    tuple2_main = ('a', 'b', 'c')
+    print(f"Is {tuple2_sub} a subsequence of {tuple2_main}? {is_subsequence(tuple2_sub, tuple2_main)}") # Expected: False (order matters)
+
+    # --- Examples with Empty Sequences ---
+    empty_sub = []
+    any_main = ["a", "b", "c"]
+    print(f"Is {empty_sub} a subsequence of {any_main}? {is_subsequence(empty_sub, any_main)}") # Expected: True
+
+    non_empty_sub = ["a"]
+    empty_main = []
+    print(f"Is {non_empty_sub} a subsequence of {empty_main}? {is_subsequence(non_empty_sub, empty_main)}") # Expected: False
+        
+    """
+
+    # If sub_sequence is empty, it's always a subsequence of any main_sequence
+    if not sub_sequence:
+        return True
+
+    # If sub_sequence is longer than main_sequence, it cannot be a subsequence
+    if len(sub_sequence) > len(main_sequence):
+        return False
+
+    main_index = -1  # Start looking from the beginning of main_sequence
+    for element in sub_sequence:
+        found = False
+        # Search for 'element' in main_sequence starting from 'main_index + 1'
+        for i in range(main_index + 1, len(main_sequence)):
+            if main_sequence[i] == element:
+                main_index = i  # Update the index to the current position of the found element
+                found = True
+                break  # Move to the next element in sub_sequence
+        if not found:
+            return False  # If an element is not found, it's not a subsequence
+
+    return True  # All elements in sub_sequence were found in order
+
+
+def filter_elements_by_another(
+    main_collection: Iterable, 
+    filter_criteria: Iterable, 
+    return_type: str = "list"
+) -> Union[list, tuple, set]:
+    """Filters elements from a main collection that are also present in a filter criteria collection.
+
+    This function is highly flexible, accepting lists, tuples, or sets as input for both
+    `main_collection` and `filter_criteria`. It efficiently identifies common elements
+    and returns them in the specified output type (list, tuple, or set).
+
+    Args:
+        main_collection (Iterable): The collection (list, tuple, or set) from which elements will be filtered.
+        filter_criteria (Iterable): The collection (list, tuple, or set) containing elements to use as a filter.
+        return_type (str, optional): The desired type of the returned collection.
+                                     Accepted values are "list", "tuple", or "set".
+                                     Defaults to "list".
+
+    Returns:
+        Union[list, tuple, set]: A new collection of the specified `return_type`
+                                 containing only the elements from `main_collection` that are
+                                 present in `filter_criteria`.
+
+    Raises:
+        TypeError: If `main_collection` or `filter_criteria` is not a recognized iterable type (list, tuple, set).
+        ValueError: If `return_type` is not one of "list", "tuple", or "set".
+
+    Example of use:
+        >>> my_set = {1, 2, 3, 4, 5}
+        >>> filter_list = [2, 4, 6]
+        >>> filter_elements_by_another(my_set, filter_list, return_type="set")
+        {2, 4}
+
+        >>> data_tuple = ("a", "b", "c", "d")
+        >>> criteria_set = {"b", "d", "e"}
+        >>> filter_elements_by_another(data_tuple, criteria_set, return_type="list")
+        ['b', 'd']
+
+        >>> list_numbers = [10, 20, 30, 20, 40]
+        >>> common_values = {20, 50}
+        >>> filter_elements_by_another(list_numbers, common_values, return_type="tuple")
+        (20, 20)
+    """
+    # Input type validation for main_collection and filter_criteria
+    valid_input_types = (list, tuple, set)
+    if not isinstance(main_collection, valid_input_types):
+        raise TypeError(f"'main_collection' must be a list, tuple, or set, not {type(main_collection).__name__}.")
+    if not isinstance(filter_criteria, valid_input_types):
+        raise TypeError(f"'filter_criteria' must be a list, tuple, or set, not {type(filter_criteria).__name__}.")
+
+    # Validate the requested return_type
+    valid_return_types = {"list", "tuple", "set"}
+    if return_type not in valid_return_types:
+        raise ValueError(f"Invalid 'return_type'. Expected one of {', '.join(valid_return_types)}, got '{return_type}'.")
+
+    # Convert the filter_criteria to a set for O(1) average time complexity lookups.
+    # This is crucial for performance, especially with large collections.
+    filter_set = set(filter_criteria)
+
+    # Use a list comprehension to build an intermediate list of filtered elements.
+    # This ensures consistent processing before converting to the final desired type.
+    filtered_elements_list = [element for element in main_collection if element in filter_set]
+
+    # Convert the intermediate list to the specified return_type
+    if return_type == "list":
+        return filtered_elements_list
+    elif return_type == "tuple":
+        return tuple(filtered_elements_list)
+    elif return_type == "set":
+        # Converting to a set will automatically handle uniqueness
+        return set(filtered_elements_list)
+    
+
+def pick_in_collection(
+    collection: Iterable,
+    prompt: str = "Por favor, selecciona una opción:",
+    allow_multiple: bool = False,
+    return_index: bool = False,
+    exit_on_cancel: bool = False
+) -> Union[Any, List[Any], int, List[int], None]:
+    """
+    Permite al usuario seleccionar una o varias opciones de cualquier colección iterable numerada.
+
+    Args:
+        collection (Iterable): Una colección de elementos (lista, tupla, conjunto, etc.)
+                               de los que el usuario puede elegir.
+                               Los elementos pueden ser de cualquier tipo (cadenas, números, objetos, etc.).
+        prompt (str, opcional): El mensaje que se mostrará al usuario antes de la lista de opciones.
+                                Por defecto: "Por favor, selecciona una opción:".
+        allow_multiple (bool, opcional): Si es True, el usuario puede seleccionar múltiples opciones
+                                          separadas por comas (ej. "1,3,5"). Por defecto es False.
+        return_index (bool, opcional): Si es True, la función devuelve el/los índice/s (basado en 0)
+                                        de la/s opción/es en la lista interna creada a partir de la colección.
+                                        Si es False, devuelve el/los valor/es de la/s opción/es.
+                                        Por defecto es False.
+        exit_on_cancel (bool, opcional): Si es True, el programa terminará si el usuario introduce
+                                          'q' o 'cancelar'. Por defecto es False.
+
+    Returns:
+        any | list[any] | int | list[int] | None:
+            - El elemento seleccionado (si allow_multiple es False).
+            - Una lista de elementos seleccionados (si allow_multiple es True).
+            - El índice del elemento seleccionado (si return_index es True y allow_multiple es False).
+            - Una lista de índices (si return_index es True y allow_multiple es True).
+            - None si el usuario cancela (introduce 'q' o 'cancelar') y exit_on_cancel es False.
+
+    Raises:
+        TypeError: Si la 'collection' proporcionada no es iterable.
+        ValueError: Si la 'collection' está vacía.
+
+    Ejemplos de uso:
+        >>> colores_tuple = ("Rojo", "Verde", "Azul", "Amarillo")
+        >>> color_elegido = pick_in_collection(colores_tuple, "Elige tu color favorito:")
+        >>> print(f"Has elegido: {color_elegido}")
+
+        >>> numeros_set = {10, 20, 30, 40, 50}
+        >>> numeros_elegidos = pick_in_collection(numeros_set, "Elige algunos números:", allow_multiple=True)
+        >>> print(f"Has elegido: {numeros_elegidos}")
+
+        >>> texto_generator = (f"Item {i}" for i in range(1, 6))
+        >>> item_elegido = pick_in_collection(texto_generator, "Selecciona un ítem del generador:", return_index=True)
+        >>> print(f"El índice del ítem elegido es: {item_elegido}")
+    """
+
+    if not isinstance(collection, Iterable):
+        raise TypeError("El argumento 'collection' debe ser un iterable (e.g., lista, tupla, conjunto).")
+
+    # Convertir el iterable a una lista para asegurar un orden y permitir el acceso por índice.
+    # Esto también consume generadores.
+    options_list = list(collection)
+
+    if not options_list:
+        raise ValueError("La colección de opciones no puede estar vacía después de la conversión a lista.")
+
+    while True:
+        print(f"\n{prompt}")
+        for i, option in enumerate(options_list):
+            print(f"  {i + 1}. {option}")
+
+        if allow_multiple:
+            input_msg = "Introduce los números de las opciones (separados por comas), o 'q' para cancelar: "
+        else:
+            input_msg = "Introduce el número de la opción, o 'q' para cancelar: "
+
+        user_input = input(input_msg).strip().lower()
+
+        if user_input in ('q', 'cancelar'):
+            if exit_on_cancel:
+                print("Operación cancelada. Saliendo del programa.")
+                sys.exit(0)  # Termina el programa
+            else:
+                print("Operación cancelada.")
+                return None
+
+        try:
+            if allow_multiple:
+                selected_indices = []
+                input_parts = [part.strip() for part in user_input.split(',')]
+                
+                if not input_parts or any(not part.isdigit() for part in input_parts):
+                    raise ValueError("Entrada inválida. Por favor, introduce números enteros separados por comas.")
+
+                for part in input_parts:
+                    choice_num = int(part)
+                    if not (1 <= choice_num <= len(options_list)):
+                        raise ValueError(f"El número {choice_num} está fuera de rango. Por favor, introduce un número entre 1 y {len(options_list)}.")
+                    selected_indices.append(choice_num - 1) # Convertir a índice basado en 0
+                
+                # Eliminar duplicados y ordenar para consistencia si es necesario
+                selected_indices = sorted(list(set(selected_indices)))
+
+                if return_index:
+                    return selected_indices
+                else:
+                    return [options_list[idx] for idx in selected_indices]
+            else:
+                choice_num = int(user_input)
+                if not (1 <= choice_num <= len(options_list)):
+                    raise ValueError(f"El número {choice_num} está fuera de rango. Por favor, introduce un número entre 1 y {len(options_list)}.")
+
+                selected_index = choice_num - 1 # Convertir a índice basado en 0
+
+                if return_index:
+                    return selected_index
+                else:
+                    return options_list[selected_index]
+        except ValueError as e:
+            print(f"Entrada inválida: {e}. Por favor, inténtalo de nuevo.")
+        except Exception as e:
+            print(f"Ha ocurrido un error inesperado: {e}. Por favor, inténtalo de nuevo.")
+
+
+def collection_filter(
+    collection: Iterable[Any],
+    filter_logic_func: Callable[[Any], bool]
+) -> Union[List[Any], Tuple[Any, ...], Set[Any]]:
+    """
+    Filters an iterable (list, tuple, set, etc.) based on a provided filtering function.
+
+    Args:
+        collection: The iterable to filter (e.g., a list, tuple, or set).
+        filter_logic_func: A callable (function) that takes a single item from the
+            collection as input and returns True if the item should be included
+            in the filtered result, False otherwise.
+
+    Returns:
+        A new collection of the same type as the input (list, tuple, or set)
+        containing only the items for which filter_logic_func returned True.
+
+    Raises:
+        TypeError: If 'collection' is not an iterable or 'filter_logic_func' is not callable.
+
+    Example of use:
+        >>> numbers = [1, 2, 3, 4, 5, 6]
+        >>> is_even = lambda x: x % 2 == 0
+        >>> collection_filter(numbers, is_even)
+        [2, 4, 6]
+
+        >>> data_tuple = (10, 15, 20, 25)
+        >>> is_greater_than_20 = lambda x: x > 20
+        >>> collection_filter(data_tuple, is_greater_than_20)
+        (25,)
+
+        >>> unique_letters = {'a', 'b', 'c', 'd'}
+        >>> is_vowel = lambda x: x in 'aeiou'
+        >>> collection_filter(unique_letters, is_vowel)
+        {'a'}
+    """
+    # Validate inputs to ensure they are of the expected types.
+    # This helps catch errors early and provides clear feedback.
+    if not isinstance(collection, Iterable):
+        raise TypeError("Input 'collection' must be an iterable (e.g., list, tuple, set).")
+    if not callable(filter_logic_func):
+        raise TypeError("Input 'filter_logic_func' must be a callable function.")
+
+    # Convert the filtered results to the original collection type.
+    # This avoids redundant type checks and ensures type consistency.
+    filtered_items = [item for item in collection if filter_logic_func(item)]
+
+    # Return the filtered items, cast to the original collection's type.
+    # This is more concise than multiple if/elif branches for type conversion.
+    if isinstance(collection, list):
+        return filtered_items
+    elif isinstance(collection, tuple):
+        return tuple(filtered_items)
+    elif isinstance(collection, set):
+        return set(filtered_items)
+    else:
+        # Default to a list if the collection type is not explicitly handled.
+        # This makes the function more flexible for various iterable types.
+        return filtered_items
+    
+
+def execute_os_command(command: Union[str, list[str]]) -> Tuple[int, str, str]:
+    """
+    Executes a command in the underlying operating system and captures its output.
+
+    This function provides a secure and flexible way to interact with the shell
+    or directly execute programs. It uses `subprocess.Popen` for fine-grained control
+    and is generally preferred over `os.system` for security and functionality.
+
+    Args:
+        command (Union[str, list[str]]): The command to execute.
+            - If a string, it will be executed via the shell (e.g., 'ls -l', 'dir').
+              Be cautious with user-provided input when `shell=True` due to security risks.
+            - If a list of strings, it will be executed directly without a shell
+              (e.g., ['ls', '-l'], ['cmd.exe', '/c', 'dir']). This is safer for
+              commands constructed from untrusted input.
+
+    Returns:
+        Tuple[int, str, str]: A tuple containing:
+            - int: The return code of the command (0 typically indicates success).
+            - str: The standard output (stdout) of the command as a string.
+            - str: The standard error (stderr) of the command as a string.
+
+    Raises:
+        TypeError: If the 'command' argument is not a string or a list of strings.
+        subprocess.CalledProcessError: If the command returns a non-zero exit status
+                                      and `check=True` (though not used directly here,
+                                      it's good to be aware of this common subprocess error).
+        FileNotFoundError: If the command or executable specified is not found.
+        # Other subprocess-related exceptions can occur (e.g., PermissionError)
+
+    Example of use:
+        >>> # Example 1: Listing directory contents (shell=True for simplicity, but be careful!)
+        >>> return_code, stdout, stderr = execute_os_command("ls -l" if os.name == 'posix' else "dir")
+        >>> print(f"Return Code: {return_code}")
+        >>> print("STDOUT:")
+        >>> print(stdout)
+        >>> if stderr:
+        >>>     print("STDERR:")
+        >>>     print(stderr)
+
+        >>> # Example 2: Running a command without shell (safer for user input)
+        >>> # On Linux/macOS:
+        >>> # return_code, stdout, stderr = execute_os_command(["echo", "Hello from Python!"])
+        >>> # On Windows:
+        >>> # return_code, stdout, stderr = execute_os_command(["cmd.exe", "/c", "echo", "Hello from Python!"])
+        >>> # print(f"Return Code: {return_code}")
+        >>> # print("STDOUT:")
+        >>> # print(stdout)
+
+        >>> # Example 3: Command with an error
+        >>> # return_code, stdout, stderr = execute_os_command("nonexistent_command")
+        >>> # print(f"Return Code: {return_code}")
+        >>> # print("STDOUT:")
+        >>> # print(stdout)
+        >>> # print("STDERR:")
+        >>> # print(stderr)
+    """
+    if not isinstance(command, (str, list)):
+        raise TypeError("The 'command' argument must be a string or a list of strings.")
+    if isinstance(command, list) and not all(isinstance(item, str) for item in command):
+        raise TypeError("If 'command' is a list, all its elements must be strings.")
+
+    # Determine if shell should be used. Using shell=True for string commands is common
+    # but also carries security implications if 'command' originates from untrusted user input.
+    # For list commands, shell=False is the default and generally safer.
+    use_shell = isinstance(command, str)
+
+    try:
+        # subprocess.run is the high-level interface recommended for most cases.
+        # It runs the command, waits for it to complete, and then returns a CompletedProcess object.
+        # capture_output=True ensures stdout and stderr are captured.
+        # text=True decodes stdout/stderr as text using default encoding (or specified encoding).
+        # check=False means it will not raise an exception for non-zero exit codes;
+        #            instead, the return code is provided in the result.
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,  # Decode output as text (uses default encoding, e.g., UTF-8)
+            shell=use_shell,
+            check=False # Do not raise CalledProcessError for non-zero exit codes
+        )
+
+        return result.returncode, result.stdout.strip(), result.stderr.strip()
+
+    except FileNotFoundError:
+        # This occurs if the command itself (the executable) is not found in the system's PATH.
+        return 127, "", "Error: Command not found." # Common exit code for command not found
+
+    except Exception as e:
+        # Catch other potential errors during process execution (e.g., permissions)
+        return 1, "", f"An unexpected error occurred: {e}"

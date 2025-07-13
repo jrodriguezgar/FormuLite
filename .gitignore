@@ -192,3 +192,36 @@ cython_debug/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
+
+# Gitbuh Coplit Recommendations ->
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+*~
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Logs and databases
+*.log
+*.sqlite
+*.db
+logs/
+data/
+
+#my files ->
+
+# Documentation folder
+doc/
+docs/
+
+# Specific folders
+.vscode/
+tests/
+
+# Specific files
+pyproject.toml
+how_to_use_it.py

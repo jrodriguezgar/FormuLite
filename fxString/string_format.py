@@ -1,0 +1,1660 @@
+from datetime import datetime
+from typing import Optional, Union, Any
+import locale as sys_locale
+
+from urllib.parse import quote_plus # For optional encoding if needed later
+
+
+import importlib.resources # To access resources within the installed package
+import os # For path management if not using importlib.resources (less recommended for packages)
+
+import re
+
+import unicodedata
+
+from formulite.fxString import string_operations as fxStrOp
+
+
+#Load legal forms data (executed once when the module is imported) ---
+# LEGAL_FORMS_SET will contain all legal forms for efficient lookups.
+# A 'set' is used for average O(1) lookups.
+LEGAL_FORMS_SET = set()
+# Optional: LEGAL_FORMS_BY_COUNTRY if you need to filter by country.
+LEGAL_FORMS_BY_COUNTRY = {}
+
+def _load_legal_forms_data():
+    """
+    Loads legal forms from the company_legalforms.txt file
+    into LEGAL_FORMS_SET and LEGAL_FORMS_BY_COUNTRY.
+    This function is called automatically once when the module is imported.
+    """
+    try:
+        # IMPORTANT FOR DISTRIBUTABLE LIBRARIES!
+        # Use importlib.resources to access the file within your package.
+        # Assumes 'company_legalforms.txt' is in the 'data' subpackage
+        # of 'my_data_parser'.
+        # Why: This ensures that the file can be found regardless of how the package is installed
+        # (e.g., pip install, editable install).
+        file_path = importlib.resources.files('my_data_parser.data') / 'company_legalforms.txt'
+        
+        with file_path.open('r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                # Why: Ignore empty lines or comments to ensure only valid data is processed.
+                if not line or line.startswith('#'):
+                    continue
+                
+                # Assume fields are separated by tabs.
+                parts = line.split('\t') 
+                if len(parts) == 2:
+                    code_country, short_legal_form = parts[0].strip(), parts[1].strip()
+                    
+                    # Store the legal form in lowercase for case-insensitive searches
+                    # and remove common trailing punctuation to normalize (e.g., "Inc." vs "Inc").
+                    # Why: Normalizing the forms once during loading prevents repeated normalization
+                    # during lookups and ensures consistent matching.
+                    normalized_form = short_legal_form.lower().rstrip('.,')
+                    LEGAL_FORMS_SET.add(normalized_form)
+                    
+                    # Load by country as well (if needed)
+                    # Why: This structure allows for future enhancements where country-specific legal forms might be required.
+                    if code_country not in LEGAL_FORMS_BY_COUNTRY:
+                        LEGAL_FORMS_BY_COUNTRY[code_country] = set()
+                    LEGAL_FORMS_BY_COUNTRY[code_country].add(normalized_form)
+                    
+    except FileNotFoundError:
+        # Why: It's important to inform the user if the data file is missing,
+        # as it affects the core functionality of the module.
+        print(f"Warning: Legal forms file '{file_path}' not found. "
+              "Parsing functionality might be incomplete.")
+    except Exception as e:
+        # Why: Catching a general exception here provides robustness against unexpected issues
+        # during file reading or parsing.
+        print(f"Unexpected error loading legal forms: {e}")
+
+# Call the data loading function **once** when the module is imported.
+# Why: This ensures the data is available immediately upon module import
+# and avoids repeated loading, which would be inefficient.
+_load_legal_forms_data()
+
+
+# Constants should be in uppercase with underscores.
+# Using a frozenset for faster 'in' lookups compared to a list.
+EXCLUDED_COMPANY_TYPES = frozenset([
+    'ORGANO DE LA ADMINISTRACION', 'ENTIDAD NO LUCRATIVA', 'CORPORACION LOCAL',
+    'SUCURSAL EN ESPAÑA', 'PARTIDO POLITICO', 'ORGANISMO AUTONOMO',
+    'ENTIDAD NO RESIDENTE', 'ASOCIACION', 'FUNDACION', 'CAJA', 'MUTUA', 'FONDO'
+])
+
+# Define company types that are abbreviated with a single dot.
+SHORT_TYPES_WITH_DOTS = frozenset(['LTD', 'INC', 'CO'])
+
+
+def sql_quote(sql_string: str, db_type: str) -> str:
+    """Escapes single quotes in a SQL string based on the database type.
+
+    This function prevents SQL injection by properly escaping single quotes
+    within a given SQL string. Different database systems handle quote
+    escaping differently (e.g., SQLite and Oracle use two single quotes,
+    while others might use a backslash).
+
+    Args:
+        sql_string (str): The SQL string that needs to have its quotes escaped.
+        db_type (str): The type of the database ('sqlite', 'oracle', or others).
+
+    Returns:
+        str: The SQL string with single quotes properly escaped for the specified database type.
+
+    Raises:
+        ValueError: If db_type is not a string.
+
+    Example:
+        >>> sql_quote("SELECT * FROM users WHERE name = 'O''Reilly'", "sqlite")
+        "SELECT * FROM users WHERE name = ''O''''Reilly''"
+        >>> sql_quote("INSERT INTO products (name) VALUES ('Laptop')", "postgresql")
+        "INSERT INTO products (name) VALUES ('\'Laptop'\'')"
+    """
+    if not isinstance(db_type, str):
+        # We raise a ValueError because the db_type is expected to be a string
+        # for proper conditional logic.
+        raise ValueError("The 'db_type' argument must be a string.")
+
+    # Convert db_type to lowercase to ensure case-insensitive comparison.
+    # This prevents issues where 'SQLite' or 'ORACLE' might not be matched.
+    normalized_db_type = db_type.lower()
+
+    if normalized_db_type in ('sqlite', 'oracle'):
+        # SQLite and Oracle use two single quotes to escape a single quote.
+        return sql_string.replace("'", "''")
+    else:
+        # Most other SQL databases (e.g., PostgreSQL, MySQL) use a backslash
+        # to escape single quotes.
+        return sql_string.replace("'", "\\'")
+
+    # Cost: O(n) where n is the length of sql_string due to the string replacement operation.
+
+def format_date(date_input: Union[str, datetime], output_format: str = None,
+                locale: str = "en_US") -> str:
+    """
+    Formats a date input (string or datetime object) into a specified output format,
+    considering the given locale for parsing string inputs and default output format.
+
+    This function accepts either a string representing a date or a datetime object.
+    If the input is a string, it attempts to parse it using various common date formats
+    relevant to the specified locale. It then formats the resulting datetime object
+    into the desired output format.
+
+    Args:
+        date_input (Union[str, datetime]): The input date, which can be a string
+                                            or a datetime object, to be formatted.
+        output_format (str, optional): The desired output format for the date.
+                                       If None, it defaults to "%Y-%m-%d" for "en_US"
+                                       and "%d/%m/%Y" for "es_ES".
+        locale (str, optional): The locale to use for parsing string dates and
+                                default output format. Supported locales are "en_US"
+                                (Anglo-Saxon) and "es_ES" (European).
+                                Defaults to "en_US".
+
+    Returns:
+        str: The formatted date string.
+
+    Raises:
+        ValueError: If the input date string cannot be parsed into a valid date
+                    for the given locale, or if an unsupported locale is provided.
+        TypeError: If the 'date_input' type is unsupported.
+    """
+    # Determine the default output format based on locale if not explicitly provided
+    if output_format is None:
+        if locale == "en_US":
+            default_output_format = "%Y-%m-%d"
+        elif locale == "es_ES":
+            default_output_format = "%d/%m/%Y"
+        else:
+            raise ValueError(f"Unsupported locale: '{locale}'. "
+                             "Supported locales are 'en_US' and 'es_ES'.")
+    else:
+        default_output_format = output_format # Use the provided format if specified
+
+    if isinstance(date_input, datetime):
+        parsed_date = date_input
+    elif isinstance(date_input, str):
+        # Define common input date formats based on the specified locale.
+        if locale == "en_US":
+            input_formats = [
+                "%Y-%m-%d",            # ISO-MM-DD (Universal)
+                "%m/%d/%Y",            # MM/DD/YYYY
+                "%m-%d-%Y",            # MM-DD-YYYY
+                "%b %d, %Y",           # Mon DD, YYYY (e.g., Oct 26, 2023)
+                "%B %d, %Y",           # Month DD, YYYY (e.g., October 26, 2023)
+                "%Y%m%d",              # YYYYMMDD
+            ]
+        elif locale == "es_ES":
+            input_formats = [
+                "%Y-%m-%d",            # ISO-MM-DD (Universal, still useful for parsing)
+                "%d/%m/%Y",            # DD/MM/YYYY (Common European default)
+                "%d-%m-%Y",            # DD-MM-YYYY
+                "%d/%m/%y",            # DD/MM/YY (e.g., 26/10/23)
+                "%b %d, %Y",           # Mon DD, YYYY (for international compatibility)
+                "%B %d, %Y",           # Month DD, YYYY
+                "%Y%m%d",              # YYYYMMDD
+            ]
+        else:
+            raise ValueError(f"Unsupported locale: '{locale}'. "
+                             "Supported locales are 'en_US' and 'es_ES'.")
+
+        parsed_date = None
+        for fmt in input_formats:
+            try:
+                parsed_date = datetime.strptime(date_input, fmt)
+                break
+            except ValueError:
+                continue
+
+        if parsed_date is None:
+            raise ValueError(f"Unable to parse date string: '{date_input}' for locale '{locale}'. "
+                             "Please ensure it's a valid date format for the specified locale.")
+    else:
+        raise TypeError("Unsupported type for 'date_input'. Must be a string or a datetime object.")
+
+    return parsed_date.strftime(default_output_format)
+
+
+def format_number(number_input: Union[int, float, str], decimal_places: int = 2,
+                  locale: str = "en_US", currency_symbol: str = "") -> str:
+    """
+    Formats a numeric input (int, float, or string) according to specified locale conventions.
+
+    This function provides flexible formatting for numbers, including control over
+    decimal places, thousands separators, and optional currency symbols, based
+    on the chosen locale (e.g., "en_US" for Anglo-Saxon, "es_ES" for European).
+
+    Args:
+        number_input (Union[int, float, str]): The input number, which can be an
+                                                integer, float, or a string representation
+                                                of a number.
+        decimal_places (int, optional): The number of decimal places to include.
+                                        Defaults to 2.
+        locale (str, optional): The locale for formatting conventions.
+                                Supports "en_US" (Anglo-Saxon: comma for thousands, dot for decimals)
+                                and "es_ES" (European: dot for thousands, comma for decimals).
+                                Defaults to "en_US".
+        currency_symbol (str, optional): An optional string to prepend as a currency symbol.
+                                         Defaults to "".
+
+    Returns:
+        str: The formatted number as a string.
+
+    Raises:
+        ValueError: If the input cannot be converted into a valid number or an unsupported locale is provided.
+        TypeError: If the 'decimal_places' argument is not an integer.
+    """
+    if not isinstance(decimal_places, int):
+        raise TypeError("'decimal_places' must be an integer.")
+
+    numeric_value: Union[int, float]
+
+    if isinstance(number_input, (int, float)):
+        numeric_value = number_input
+    elif isinstance(number_input, str):
+        try:
+            if locale == "es_ES":
+                temp_string = number_input.replace(".", "").replace(",", ".")
+                numeric_value = float(temp_string)
+            else:
+                numeric_value = float(number_input)
+        except ValueError:
+            raise ValueError(f"Unable to convert '{number_input}' to a valid number. "
+                             "Please ensure it's a numeric string.")
+    else:
+        raise TypeError("Unsupported type for 'number_input'. Must be an int, float, or string.")
+
+    formatted_number_str = f"{numeric_value:,.{decimal_places}f}"
+
+    if locale == "es_ES":
+        temp_formatted = formatted_number_str.replace(",", "TEMP_COMMA").replace(".", ",").replace("TEMP_COMMA", ".")
+        formatted_number_str = temp_formatted
+
+    if currency_symbol:
+        return f"{currency_symbol}{formatted_number_str}"
+    return formatted_number_str
+
+
+def format_number_with_negative_style(
+    number_input: Union[int, float, str],
+    decimal_places: int = 2,
+    locale: str = "en_US",
+    currency_symbol: str = "",
+    negative_style: str = "minus"
+) -> str:
+    """
+    Formats a numeric input, handling negative numbers with either a minus sign or parentheses.
+
+    This function leverages the `format_number` function for standard formatting
+    (decimal places, locale, currency) and then applies a specific style
+    for negative numbers.
+
+    Args:
+        number_input (Union[int, float, str]): The number to format.
+        decimal_places (int, optional): The number of decimal places. Defaults to 2.
+        locale (str, optional): The locale for formatting ("en_US" or "es_ES").
+                                Defaults to "en_US".
+        currency_symbol (str, optional): An optional currency symbol. Defaults to "".
+        negative_style (str, optional): How to display negative numbers.
+                                        Accepts "minus" (e.g., -123.45) or
+                                        "parentheses" (e.g., (123.45)).
+                                        Defaults to "minus".
+
+    Returns:
+        str: The formatted number as a string.
+
+    Raises:
+        ValueError: If the input cannot be converted to a number, an unsupported
+                    locale is provided, or an invalid `negative_style` is used.
+        TypeError: If 'decimal_places' is not an integer.
+
+    Example of use:
+        >>> format_number_with_negative_style(-12345.678, decimal_places=2, currency_symbol="$", negative_style="parentheses")
+        '($12,345.68)'
+        >>> format_number_with_negative_style(-987.65, decimal_places=1, locale="es_ES", negative_style="minus")
+        '-987,7'
+        >>> format_number_with_negative_style(5000, decimal_places=0)
+        '5,000'
+    """
+    if negative_style not in ["minus", "parentheses"]:
+        raise ValueError("Invalid 'negative_style'. Must be 'minus' or 'parentheses'.")
+
+    # First, convert the input to a numeric value to check its sign.
+    numeric_value: Union[int, float]
+    if isinstance(number_input, (int, float)):
+        numeric_value = number_input
+    elif isinstance(number_input, str):
+        try:
+            # Handle locale-specific string to float conversion if the number is negative
+            # so the sign is correctly interpreted before passing to format_number
+            if locale == "es_ES":
+                temp_string = number_input.replace(".", "").replace(",", ".")
+                numeric_value = float(temp_string)
+            else:
+                numeric_value = float(number_input)
+        except ValueError:
+            raise ValueError(f"Unable to convert '{number_input}' to a valid number. "
+                             "Please ensure it's a numeric string.")
+    else:
+        raise TypeError("Unsupported type for 'number_input'. Must be an int, float, or string.")
+
+    # If the number is negative and parentheses style is requested
+    if numeric_value < 0 and negative_style == "parentheses":
+        # Format the absolute value of the number
+        formatted_abs_value = format_number(
+            abs(numeric_value),
+            decimal_places=decimal_places,
+            locale=locale,
+            currency_symbol=currency_symbol
+        )
+        return f"({formatted_abs_value})"
+    else:
+        # Otherwise, just use the standard formatting, which handles the minus sign by default
+        return format_number(
+            numeric_value,
+            decimal_places=decimal_places,
+            locale=locale,
+            currency_symbol=currency_symbol
+        )
+
+
+def autoformat(data_input: Any, locale: str = "en_US") -> str:
+    """
+    Automatically formats an input value as a date or a number based on its type
+    and content, adhering to the specified locale conventions for both parsing
+    and default output formats. If unable to format, returns the original input
+    as a string.
+
+    This function attempts to interpret the input as a datetime object. If it's
+    not a datetime object and appears to be a string, it tries to parse it
+    as a date using locale-specific formats. If date parsing fails, it then attempts
+    to interpret and format the input as a number (int, float, or numeric string),
+    again respecting the locale's number formatting conventions.
+
+    Args:
+        data_input (Any): The input data to be auto-formatted. Can be a datetime object,
+                          an int, a float, or a string that represents a date or a number.
+        locale (str, optional): The locale to use for both date and number formatting.
+                                Supported locales are "en_US" (Anglo-Saxon)
+                                and "es_ES" (European). Defaults to "en_US".
+
+    Returns:
+        str: The automatically formatted string representation of the input,
+             or the original input converted to string if formatting fails.
+
+    Raises:
+        TypeError: If the input type is fundamentally unsupported.
+
+    Example of use:
+        >>> from datetime import datetime
+
+        >>> # Successful formatting
+        >>> autoformat("10/26/2023", locale="en_US")
+        '2023-10-26'
+        >>> autoformat("26/10/2023", locale="es_ES")
+        '26/10/2023'
+        >>> autoformat(1234567.89, locale="en_US")
+        '1,234,567.89'
+        >>> autoformat("98.765,43", locale="es_ES")
+        '98.765,43'
+
+        >>> # Fallback to original data
+        >>> autoformat("not a date or number", locale="en_US")
+        'not a date or number'
+        >>> autoformat([1, 2, 3], locale="es_ES") # Unsupported type, will return str([1, 2, 3])
+        '[1, 2, 3]'
+        >>> autoformat(None)
+        'None'
+    """
+    # Determine the default output format for dates based on locale
+    default_date_output_format = "%Y-%m-%d"
+    if locale == "es_ES":
+        default_date_output_format = "%d/%m/%Y"
+
+    # Handle direct datetime, int, or float types first
+    if isinstance(data_input, datetime):
+        return format_date(data_input, output_format=default_date_output_format, locale=locale)
+    elif isinstance(data_input, (int, float)):
+        return format_number(data_input, locale=locale)
+
+    # For string inputs, attempt date then number formatting, with a final fallback.
+    elif isinstance(data_input, str):
+        try:
+            # Attempt to format as a DATE
+            # We call format_date, if it succeeds, it means it's a date and we return its formatted value.
+            return format_date(data_input, output_format=default_date_output_format, locale=locale)
+        except ValueError:
+            # If not a date, attempt to format as a NUMBER
+            try:
+                # Prepare the string for float conversion based on locale
+                numeric_string_for_float = data_input
+                if locale == "es_ES":
+                    # Remove thousands separators (dots) and replace decimal comma with dot for float conversion
+                    numeric_string_for_float = data_input.replace(".", "").replace(",", ".")
+                
+                # Try converting to float
+                numeric_value = float(numeric_string_for_float)
+                
+                # If conversion to float succeeds, format it as a number
+                return format_number(numeric_value, locale=locale)
+            except ValueError:
+                # If neither date nor number parsing works, return the original string.
+                return str(data_input) # Ensure it's a string, just in case data_input was technically something else convertible to str.
+    else:
+        # If the type itself is not string, datetime, int, or float,
+        # return its string representation as a fallback.
+        # This handles types like lists, dicts, None, etc. gracefully without raising TypeError.
+        return str(data_input)
+    
+
+def get_string_format(input_string: str) -> int:
+    """Determines the casing format of a given string.
+
+    This function analyzes the input string to identify if it's entirely
+    lowercase, uppercase, title-cased, capitalized, or none of these (mixed/unknown).
+
+    Args:
+        input_string (str): The string to analyze.
+
+    Returns:
+        int:
+            0: None, empty, or mixed/unknown format.
+            1: Lowercase (e.g., "lowercase text").
+            2: Capitalized (first letter uppercase, rest lowercase, e.g., "Capitalized text.").
+            3: Title case (first letter of each word uppercase, e.g., "An Example Title", "Word").
+            4: Uppercase (e.g., "UPPERCASE TEXT").
+
+    Example:
+        >>> get_string_format("hello world")
+        1
+        >>> get_string_format("Hello World")
+        3
+        >>> get_string_format("HELLO WORLD")
+        4
+        >>> get_string_format("Hello world")
+        2
+        >>> get_string_format("MiXeD cAsE")
+        0
+        >>> get_string_format(None)
+        0
+        >>> get_string_format("")
+        0
+    """
+    if input_string is None or not input_string:
+        # Handles None and empty strings as unknown/no format.
+        return 0
+    if input_string.isupper():
+        # Checks if all characters are uppercase.
+        return 4
+    if input_string.islower():
+        # Checks if all characters are lowercase.
+        return 1
+    if input_string.istitle():
+        # Checks if the string is in title case (first letter of each word is capitalized).
+        # This also correctly handles single words like "Word".
+        return 3
+    if input_string == input_string.capitalize():
+        # Checks if only the first letter of the entire string is capitalized,
+        # and the rest are lowercase. This condition is reached only if it's
+        # not already captured by isupper, islower, or istitle.
+        return 2
+
+    # If none of the above formats match, it's considered mixed or unrecognized.
+    return 0
+
+    # Cost: O(N) where N is the length of the input_string, as string methods
+    # like isupper(), islower(), istitle(), and capitalize() iterate over the string.
+
+
+def apply_string_format(input_string: str, format_code: int) -> str:
+    """Applies a specified casing format to a given string.
+
+    This function transforms the input string based on a numeric format code,
+    converting it to lowercase, capitalized, title case, or uppercase.
+
+    Args:
+        input_string (str): The string to which the format will be applied.
+        format_code (int): The integer code representing the desired format:
+                           1 for lowercase, 2 for capitalized, 3 for title case,
+                           4 for uppercase. Any other value defaults to uppercase.
+
+    Returns:
+        str: The formatted string.
+
+    Example:
+        >>> apply_string_format("Hello World", 1)
+        'hello world'
+        >>> apply_string_format("hello world", 2)
+        'Hello world'
+        >>> apply_string_format("hello world", 3)
+        'Hello World'
+        >>> apply_string_format("hello world", 4)
+        'HELLO WORLD'
+        >>> apply_string_format("test", 99) # Defaults to uppercase
+        'TEST'
+    """
+    if format_code == 1:
+        # Converts the entire string to lowercase.
+        return input_string.lower()
+    elif format_code == 2:
+        # Capitalizes the first letter of the string and converts the rest to lowercase.
+        return input_string.capitalize()
+    elif format_code == 3:
+        # Converts the string to title case (first letter of each word capitalized).
+        return input_string.title()
+    elif format_code == 4:
+        # Converts the entire string to uppercase.
+        return input_string.upper()
+    else:
+        # If the format code is not recognized, default to uppercase.
+        # This provides a consistent fallback behavior.
+        return input_string.upper()
+
+    # Cost: O(N) where N is the length of the input_string, as string transformation
+    # methods iterate over the string.
+
+
+def auto_format_string(input_string: str) -> str:
+    """Automatically formats a string to either its original case (if all upper/lower)
+    or capitalized.
+
+    This function checks if the input string is entirely uppercase or lowercase.
+    If so, it returns the string as is. Otherwise, it capitalizes the first letter
+    of the string. This is useful for standardizing text where a consistent
+    initial capitalization is desired unless the string is already uniformly cased.
+
+    Args:
+        input_string (str): The string to format automatically.
+
+    Returns:
+        str: The automatically formatted string.
+
+    Example:
+        >>> auto_format_string("HELLO")
+        'HELLO'
+        >>> auto_format_string("hello")
+        'hello'
+        >>> auto_format_string("hello world")
+        'Hello world'
+        >>> auto_format_string("Hello world")
+        'Hello world'
+    """
+    if input_string.isupper() or input_string.islower():
+        # If the string is entirely uppercase or lowercase, return it as is.
+        return input_string
+    else:
+        # Otherwise, capitalize the first letter and make the rest lowercase.
+        return input_string.capitalize()
+
+    # Cost: O(N) where N is the length of the input_string due to string checks and transformations.
+
+
+def capitalize_string(input_string: str, mode: str = 'all') -> str:
+    """Capitalizes words in a string, with an optional mode to handle specific particles.
+
+    This function capitalizes the first letter of each word in the input string.
+    It can optionally handle 'particles' (prepositions, articles, conjunctions)
+    in Spanish by keeping them lowercase when `mode` is 'location' and they
+    are not the very first word of a segment. It intelligently splits the string
+    by spaces, hyphens, and slashes to process each word or segment independently.
+
+    Args:
+        input_string (str): The string to be capitalized.
+        mode (str, optional): The capitalization mode.
+                              'all': Capitalize every word.
+                              'location': Capitalize every word, but keep specified
+                                          particles (e.g., 'de', 'el') lowercase
+                                          unless they are the first word in a segment.
+                                          Defaults to 'all'.
+
+    Returns:
+        str: The string with words capitalized according to the specified mode.
+
+    Example:
+        >>> capitalize_string("via del mar", mode='location')
+        'Via del Mar'
+        >>> capitalize_string("san-pablo", mode='location')
+        'San-Pablo'
+        >>> capitalize_string("juan perez")
+        'Juan Perez'
+        >>> capitalize_string("calle de la amargura", mode='location')
+        'Calle de la Amargura'
+        >>> capitalize_string("felipe ii/madrid", mode='location')
+        'Felipe II/Madrid'
+    """
+    # Define a set of particles to be kept lowercase in 'location' mode.
+    # Using a set provides O(1) average time complexity for lookups,
+    # which is efficient for checking word membership.
+    particles = {"de", "al", "del", "la", "las", "los", "el", "y", "o", "u", "en", "con", "por", "para", "a"}
+
+    def _capitalize_word(word: str, is_first_word_in_segment: bool) -> str:
+        """Helper function to capitalize a single word based on the mode and position."""
+        # Only apply particle rule if mode is 'location' AND it's not the first word
+        # in its logical segment AND the word (lowercase) is in our particles set.
+        if mode == 'location' and word.lower() in particles and not is_first_word_in_segment:
+            return word.lower()
+        # Otherwise, capitalize the word.
+        return word.capitalize()
+
+    # Split the input string by delimiters (spaces, hyphens, slashes).
+    # The regex pattern `r'([\s/\-])'` ensures that the delimiters themselves
+    # are included in the `parts` list, allowing us to reconstruct the string correctly.
+    parts = re.split(r'([\s/\-])', input_string)
+    capitalized_parts = []
+
+    # This flag helps determine if a word is the first word within a segment
+    # (e.g., "VIA-DEL-MAR" means "VIA" is first, then "DEL" is first in its segment).
+    is_first_word_in_segment = True
+
+    for part in parts:
+        # Check if the current part is one of our defined delimiters.
+        if re.match(r'[\s/\-]', part):
+            capitalized_parts.append(part)
+            # Reset the flag because a delimiter signifies the start of a new segment.
+            is_first_word_in_segment = True
+        else:
+            # If it's a word, apply the capitalization rules using the helper function.
+            capitalized_parts.append(_capitalize_word(part, is_first_word_in_segment))
+            # After processing a word, the next word in the same segment won't be the first.
+            is_first_word_in_segment = False
+
+    # Join all the processed parts back into a single string.
+    return "".join(capitalized_parts)
+
+    # Cost: O(N) where N is the length of input_string due to splitting and joining
+    # operations, and word processing. The `re.split` operation and string concatenations
+    # dominate the cost.
+
+
+def pad_string(text: str, length: int, char: str = ' ', direction: str = 'right') -> str:
+    """
+    Rellena una cadena de texto hasta una longitud específica con un carácter dado.
+
+    Args:
+        text (str): La cadena de texto a rellenar.
+        length (int): La longitud total deseada de la cadena resultante.
+        char (str): El carácter con el que se rellenará la cadena. Debe ser un solo carácter.
+                    Por defecto es un espacio (' ').
+        direction (str): La dirección del relleno. Puede ser 'left' (izquierda) o 'right' (derecha).
+                         Por defecto es 'right'.
+
+    Returns:
+        str: La cadena rellenada hasta la longitud especificada.
+             Si la cadena original ya es igual o más larga que la longitud deseada,
+             se devolverá la cadena original truncada a la longitud si es más larga.
+
+    Raises:
+        ValueError: Si 'char' no es un solo carácter o 'direction' no es 'left' o 'right'.
+    """
+    if not isinstance(text, str):
+        text = str(text) # Asegurarse de que la entrada sea una cadena
+
+    if not isinstance(length, int) or length < 0:
+        raise ValueError("La longitud debe ser un número entero no negativo.")
+
+    if not isinstance(char, str) or len(char) != 1:
+        raise ValueError("El carácter de relleno (char) debe ser un solo carácter.")
+
+    if direction not in ['left', 'right']:
+        raise ValueError("La dirección debe ser 'left' o 'right'.")
+
+    # Si la cadena ya es igual o más larga, la truncamos.
+    # En muchos casos de "padding", se espera que si la cadena ya es larga,
+    # no se modifique o se trunque. Aquí optamos por truncar si excede.
+    if len(text) >= length:
+        return text[:length]
+
+    # Calcular cuántos caracteres de relleno se necesitan
+    padding_needed = length - len(text)
+    if padding_needed < 0: padding_needed = 0
+
+    if direction == 'right':
+        return text + (char * padding_needed)
+    else: # direction == 'left'
+        return (char * padding_needed) + text
+
+
+def to_upper(text: Optional[str]) -> Optional[str]:
+    """
+    Convierte una cadena de texto a mayúsculas.
+
+    Args:
+        text (Optional[str]): La cadena de texto de entrada. Puede ser None.
+
+    Returns:
+        Optional[str]: La cadena convertida a mayúsculas, o None si la entrada fue None.
+                       Si la entrada es una cadena vacía, devuelve una cadena vacía.
+    """
+    if text is None:
+        return None
+    return text.upper()
+
+
+def to_lower(text: Optional[str]) -> Optional[str]:
+    """
+    Convierte una cadena de texto a minúsculas.
+
+    Args:
+        text (Optional[str]): La cadena de texto de entrada. Puede ser None.
+
+    Returns:
+        Optional[str]: La cadena convertida a minúsculas, o None si la entrada fue None.
+                       Si la entrada es una cadena vacía, devuelve una cadena vacía.
+    """
+    if text is None:
+        return None
+    return text.lower()
+
+
+def normalize_spaces(text: Optional[str]) -> Optional[str]:
+    """
+    Normalizes whitespace in a string: replaces multiple spaces with a single space
+    and removes leading/trailing spaces.
+
+    Args:
+        text (Optional[str]): The input string. Can be None.
+
+    Returns:
+        Optional[str]: The string with normalized spaces, or None if the input was None.
+                       Returns an empty string if the input was an empty string.
+    """
+    if text is None:
+        return None
+    
+    # Use re.sub to replace one or more whitespace characters (\s+) with a single space (' ')
+    # Then use .strip() to remove leading/trailing whitespace.
+    return re.sub(r'\s+', ' ', text).strip()
+
+
+def normalize_symbols(text: Optional[str]) -> Optional[str]:
+    """
+    Normalizes spacing around common symbols and punctuation marks in a string.
+
+    This function applies the following rules:
+    1. Removes spaces around symbols that typically 'stick' to words/numbers (e.g., @, (), [], {}, <>, #, /, \, |, _, -, ?, !, ¡, º, ª).
+    2. Ensures a space AFTER punctuation that typically requires it (e.g., ., ,, :, ;).
+    3. Ensures a single space AROUND operators (e.g., +, =, &).
+    4. Removes space BEFORE currency symbols (e.g., $, €).
+    5. Finally, normalizes all remaining multiple spaces to single spaces.
+
+    Args:
+        text (Optional[str]): The input string. Can be None.
+
+    Returns:
+        Optional[str]: The string with normalized symbols and spaces, or None if the input was None.
+                       Returns an empty string if the input was an empty string.
+    """
+    if text is None:
+        return None
+
+    # Ensure the input is a string to avoid errors with string methods.
+    processed_text = str(text)
+
+    # 1. Normalize spaces around symbols that should have NO space before/after.
+    # Pattern: optional_spaces (symbol) optional_spaces -> just the symbol
+    # This handles symbols that typically "stick" to words or numbers without internal spaces.
+    # Example: "word ( content )" -> "word(content)"
+    # Note: '-' is included but should be at the end or escaped inside [] to avoid range interpretation.
+    processed_text = re.sub(r'\s*([ºª@()\[\]{}<>#/\\|_\-¿?!¡])\s*', r'\1', processed_text)
+
+    # 2. Normalize spaces around punctuation that should always have a space AFTER them
+    # and no space BEFORE them.
+    # Pattern: optional_leading_spaces (punctuation) optional_trailing_spaces -> punctuation + single_space
+    # This covers '.', ',', ':', ';'
+    # Example: "word . another" -> "word. another"
+    processed_text = re.sub(r'\s*([.,:;])\s*', r'\1 ', processed_text)
+
+    # 3. Ensure a single space *around* specific operators (+, =, &)
+    # Pattern: optional_spaces (operator) optional_spaces -> space + operator + space
+    # Example: "a+b" -> "a + b", "x = y" -> "x = y", "x =  y" -> "x = y"
+    processed_text = re.sub(r'\s*([+=&])\s*', r' \1 ', processed_text)
+
+    # 4. Remove space before currency symbols ($ , €)
+    # Pattern: optional_spaces (currency_symbol) -> just the currency_symbol
+    # It assumes these symbols should precede a number without a space.
+    # Example: " 10 $" -> "10$", "10 €" -> "10€"
+    processed_text = re.sub(r'\s*([$€])', r'\1', processed_text)
+    
+    # 5. Final normalization of multiple spaces and strip leading/trailing spaces.
+    # This catches any remaining multiple spaces and cleans up the ends.
+    return normalize_spaces(processed_text)
+
+
+def flat_vowels(input_string: str) -> str:
+    """
+    Replaces accented characters with their base letter.
+
+    Args:
+        input_string (str): The string to process.
+
+    Returns:
+        str: The string with flattened vowels and in uppercase.
+
+    Example:
+        flat_vowels("Hola, cómo estás?") returns "HOLA, COMO ESTAS?"
+    """
+    if not isinstance(input_string, str):
+        return False
+
+    nfkd_form = unicodedata.normalize('NFKD', input_string)
+    only_ascii = nfkd_form.encode('ASCII', 'ignore').decode('utf-8')
+    return only_ascii
+
+
+def ascii_string(input_string: str | None) -> str | None:
+    """
+    Converts a string to its ASCII representation, ignoring characters that cannot be encoded in ASCII.
+
+    This function is useful for cleaning strings by removing non-ASCII characters,
+    which can be beneficial when working with systems or formats that only support ASCII.
+    If the input is None, it returns None directly.
+
+    Args:
+        input_string (str | None): The string to convert. Can be None.
+
+    Returns:
+        str | None: The ASCII-encoded string. Returns None if the input was None.
+
+    Raises:
+        TypeError: If 'input_string' is provided and is not a string or None.
+
+    Example:
+        >>> ascii_string("Héllø Wörld!")
+        'Hll Wrld!'
+
+        >>> ascii_string("This is an ASCII string.")
+        'This is an ASCII string.'
+
+        >>> ascii_string(None) is None
+        True
+
+        >>> ascii_string("Grüße")
+        'Gre'
+    """
+    if input_string is None:
+        return None
+
+    if not isinstance(input_string, str):
+        raise TypeError("Input 'input_string' must be a string or None.")
+
+    # Encode the string to ASCII, ignoring characters that cannot be represented in ASCII.
+    # Then, decode it back to a UTF-8 string to ensure it's a standard Python string.
+    # This process effectively strips out all non-ASCII characters.
+    ascii_string = input_string.encode('ascii', 'ignore').decode('utf-8')
+
+    return ascii_string
+
+
+def string_aZ09(input_string):
+    """
+    Feature Description:
+    Filters a string to keep only alphanumeric characters (a-z, A-Z, 0-9).
+    It uses a regular expression for efficient character filtering.
+
+    Args:
+        input_string (str): The string to filter.
+
+    Returns:
+        str: A new string containing only alphanumeric characters from the input.
+
+    Raises:
+        TypeError: If the input is not a string.
+
+    Usage Example:
+    string_aZ09("Hola Mundo 123!") returns "HolaMundo123"
+    """
+    if not isinstance(input_string, str):
+        return None
+
+    # Regular expression to find all alphanumeric characters
+    alphanumeric_characters = re.compile(r"[^a-zA-Z0-9]")
+
+    # Substitute all non-alphanumeric characters with an empty string
+    cleaned_string = alphanumeric_characters.sub("", input_string)
+
+    return cleaned_string
+
+
+def string_aZ09_plus(input_string, additional_charset=""):
+    """
+    Filters a string to keep only alphanumeric characters (a-z, A-Z, 0-9)
+    and any characters provided in an additional charset.
+
+    This function leverages regular expressions for efficient character filtering,
+    allowing for a highly customizable set of allowed characters.
+
+    Args:
+        input_string (str): The string to filter.
+        additional_charset (str, optional): An optional string containing
+            additional characters to allow in the filtered output. Defaults
+            to an empty string, meaning only alphanumeric characters are kept.
+
+    Returns:
+        str: A new string containing only alphanumeric characters and characters
+            from the additional_charset.
+
+    Raises:
+        TypeError: If the input_string is not a string.
+
+    Usage Example:
+        # Example 1: Basic alphanumeric filtering
+        string_aZ09_plus("Hello World 123!")  # Returns "HelloWorld123"
+
+        # Example 2: Filtering with an additional charset for spaces and hyphens
+        string_aZ09_plus("This-is a test!", " -") # Returns "This-is a test"
+
+    Cost:
+        The time complexity of this function is O(n), where n is the length of the input_string,
+        due to the regular expression substitution operation. The compilation of the regex
+        is O(m), where m is the length of the regex pattern, which is constant for repeated calls.
+    """
+    if not isinstance(input_string, str):
+        return None
+
+    # Why combine the base alphanumeric set with the additional_charset:
+    # This approach creates a comprehensive regular expression that includes
+    # all standard alphanumeric characters along with any user-defined characters.
+    # By using a character set within the regex [^...], we efficiently match
+    # anything NOT in the specified set, allowing for a single substitution operation.
+    # The re.escape is used to treat special regex characters in additional_charset
+    # as literal characters.
+    regex_pattern = r"[^a-zA-Z0-9" + re.escape(additional_charset) + r"]"
+    disallowed_characters = re.compile(regex_pattern)
+
+    # Substitute all non-allowed characters with an empty string
+    cleaned_string = disallowed_characters.sub("", input_string)
+
+    return cleaned_string
+
+
+def string_aZ(input_string):
+    """
+    Feature Description:
+    Filters a string to keep only alphabetic characters (a-z, A-Z).
+    It uses a regular expression for efficient character filtering.
+
+    Args:
+        input_string (str): The string to filter.
+
+    Returns:
+        str: A new string containing only alphabetic characters from the input.
+
+    Raises:
+        TypeError: If the input is not a string.
+
+    Usage Example:
+    string_aZ("Hola Mundo 123!") returns "HolaMundo"
+    """
+    if not isinstance(input_string, str):
+        return None
+
+    # Regular expression to find all alphabetic characters
+    alphabetic_characters = re.compile(r"[^a-zA-Z]")
+
+    # Substitute all non-alphabetic characters with an empty string
+    cleaned_string = alphabetic_characters.sub("", input_string)
+
+    return cleaned_string
+
+
+def string_aZ_plus(input_string, additional_charset=""):
+    """
+    Filters a string to keep only alphabetic characters (a-z, A-Z)
+    and any characters provided in an additional charset.
+
+    This function utilizes regular expressions for efficient character filtering,
+    allowing for a highly customizable set of allowed characters.
+
+    Args:
+        input_string (str): The string to filter.
+        additional_charset (str, optional): An optional string containing
+            additional characters to allow in the filtered output. Defaults
+            to an empty string, meaning only alphabetic characters are kept.
+
+    Returns:
+        str: A new string containing only alphabetic characters and characters
+            from the additional_charset.
+
+    Raises:
+        TypeError: If the input_string is not a string.
+
+    Usage Example:
+        # Example 1: Basic alphabetic filtering
+        string_aZ_plus("Hello World 123!")  # Returns "HelloWorld"
+
+        # Example 2: Filtering with an additional charset for spaces and hyphens
+        string_aZ_plus("This-is a test!", " -") # Returns "This-isatest"
+
+    Cost:
+        The time complexity of this function is O(n), where n is the length of the input_string,
+        due to the regular expression substitution operation. The compilation of the regex
+        is O(m), where m is the length of the regex pattern, which is constant for repeated calls.
+    """
+    if not isinstance(input_string, str):
+        return None
+
+    # Why combine the base alphabetic set with the additional_charset:
+    # This approach creates a comprehensive regular expression that includes
+    # all standard alphabetic characters along with any user-defined characters.
+    # By using a character set within the regex [^...], we efficiently match
+    # anything NOT in the specified set, allowing for a single substitution operation.
+    # The re.escape is used to treat special regex characters in additional_charset
+    # as literal characters.
+    if not additional_charset: additional_charset = ""
+    regex_pattern = r"[^a-zA-Z" + re.escape(additional_charset) + r"]"
+    disallowed_characters = re.compile(regex_pattern)
+
+    # Substitute all non-allowed characters with an empty string
+    cleaned_string = disallowed_characters.sub("", input_string)
+
+    return cleaned_string
+
+
+def numbers_from_string(
+    input_string: str,
+    separator: str = ''
+) -> Optional[str]:
+    """Extracts all numerical sequences from a given string and returns them as a single string.
+
+    This function uses regular expressions to find all occurrences of integers or
+    floating-point numbers within the input string. It then joins these numbers
+    together using an optional separator to form a single output string.
+    If no numbers are found, or the input string is empty, it returns None.
+
+    Args:
+        input_string: The string from which to extract numbers.
+        separator: The string to use to join the extracted numbers. Defaults to an
+                   empty string, meaning numbers will be concatenated directly.
+
+    Returns:
+        A single string containing all the numbers found in the input string,
+        joined by the specified separator. Returns None if no numbers are found
+        or the input string is empty.
+
+    Raises:
+        TypeError: If the input 'input_string' is not a string.
+
+    Example of use:
+        >>> numbers_from_string("The price is $12.99 with 5% tax.")
+        "12.995"
+
+        >>> numbers_from_string("Item ID: 12345, Quantity: 7", separator="-")
+        "12345-7"
+
+        >>> numbers_from_string("No numbers here.")
+        None
+
+        >>> numbers_from_string("")
+        None
+
+        >>> numbers_from_string("Measurement: -10.5 meters and 20 degrees.", separator=", ")
+        "-10.5, 20"
+    """
+    if not input_string:
+        return None
+    
+    # Validate input type to ensure it's a string.
+    if not isinstance(input_string, str):
+        raise TypeError("The input 'input_string' must be a string.")
+
+    # Define a regular expression pattern to match integers and floating-point numbers.
+    # It accounts for optional negative signs, whole numbers, and decimal numbers.
+    number_pattern = re.compile(r'-?\d+\.?\d*')
+
+    # Find all non-overlapping matches of the pattern in the string.
+    # This will return a list of all found number strings.
+    found_numbers = number_pattern.findall(input_string)
+
+    # If no numbers were found, return None as per the specification.
+    if not found_numbers:
+        return None
+
+    # Join the found number strings using the specified separator.
+    return separator.join(found_numbers)
+
+
+def remove_numbers_from_string(input_string: str) -> str:
+    """Removes all numerical digits and decimal points from a given string.
+
+    This function uses regular expressions to find and remove all occurrences
+    of digits (0-9) and periods (which are often part of numbers, e.g., '3.14').
+    It returns the modified string with numbers removed.
+
+    Args:
+        input_string: The string from which to remove numbers.
+
+    Returns:
+        A new string with all numerical digits and decimal points removed.
+
+    Raises:
+        TypeError: If the input 'input_string' is not a string.
+
+    Example of use:
+        >>> remove_numbers_from_string("The price is $12.99 with 5% tax.")
+        "The price is $ with % tax."
+
+        >>> remove_numbers_from_string("Item ID: 12345, Quantity: 7")
+        "Item ID: , Quantity: "
+
+        >>> remove_numbers_from_string("No numbers here.")
+        "No numbers here."
+
+        >>> remove_numbers_from_string("")
+        ""
+    """
+    if not input_string:
+        return None
+    
+    # Validate input type to ensure it's a string.
+    if not isinstance(input_string, str):
+        raise TypeError("The input 'input_string' must be a string.")
+
+    # Define a regular expression pattern to match any digit (0-9) or a period.
+    # The '|' acts as an OR operator, so it matches '0' OR '1' OR ... OR '9' OR '.'.
+    # This pattern effectively targets all parts of numerical representations.
+    number_and_decimal_pattern = re.compile(r'[0-9.]')
+
+    # Use re.sub() to replace all matches of the pattern with an empty string.
+    # This effectively removes them from the input string.
+    string_without_numbers = number_and_decimal_pattern.sub('', input_string)
+
+    return string_without_numbers
+
+
+def reorder_comma_fullname(name_with_surname: str) -> str:
+    """
+    Reformats a name string from 'Surname, Name' to 'Name Surname'.
+
+    This function takes a string where the surname is followed by a comma
+    and then the first name. It splits the string at the comma and
+    rearranges the parts to return the first name followed by the surname.
+
+    Args:
+        name_with_surname (str): The input string in 'Surname, Name' format.
+
+    Returns:
+        str: The reformatted name string in 'Name Surname' format.
+
+    Raises:
+        ValueError: If the input string does not contain a comma.
+
+    Example of use:
+        >>> reorder_comma_fullname("Doe, John")
+        'John Doe'
+    """
+    # Ensure that the input string contains a comma before proceeding.
+    if "," not in name_with_surname:
+        raise ValueError("Input string must contain a comma to separate name and surname.")
+
+    # Split the string into parts based on the comma.
+    # We expect two parts: surname and name.
+    parts = [part.strip() for part in name_with_surname.split(',')]
+
+    # Check if we have exactly two parts after splitting.
+    # This prevents issues with multiple commas or empty strings.
+    if len(parts) != 2:
+        raise ValueError("Input string must be in 'Surname, Name' format with exactly one comma.")
+
+    # The first part is the surname, the second part is the name.
+    surname, name = parts[0], parts[1]
+
+    # Combine the name and surname in the desired order.
+    # Cost: O(1) as it involves basic string operations.
+    return f"{name} {surname}"
+
+
+def format_email_address(email_string: str) -> str:
+    """Cleans an email address string by removing common typos and invalid characters.
+
+    This function sanitizes an email address string by:
+    1. Stripping leading and trailing whitespace.
+    2. Replacing multiple internal spaces with a single space.
+    3. Removing characters that are generally invalid in email addresses,
+       preserving standard email characters like alphanumeric, '.', '_', '+', '-', and '@'.
+       It does not attempt to validate the email structure, only to clean it for validation.
+
+    Args:
+        email_string (str): The email address string to be cleaned.
+
+    Returns:
+        str: The cleaned email address string.
+
+    Raises:
+        TypeError: If the input is not a string.
+
+    Example of use:
+        >>> format_email_address("  user.name+tag@example.com  ")
+        'user.name+tag@example.com'
+        >>> format_email_address("user @ domain.c@om")
+        'user@domain.com'
+        >>> format_email_address("invalid#char!@test.com")
+        'invalidchar@test.com'
+    """
+    if not isinstance(email_string, str):
+        # Always check input type for robustness.
+        raise TypeError("Input must be a string.")
+
+    # 1. Strip leading and trailing whitespace.
+    # Often, copy-pasted emails have accidental spaces.
+    cleaned_email = email_string.strip()
+
+    # 2. Replace multiple internal spaces with a single space.
+    # This addresses "user @example.com" -> "user@example.com".
+    cleaned_email = re.sub(r'\s+', ' ', cleaned_email)
+
+    # 3. Remove characters generally not valid in email addresses.
+    # This regex keeps alphanumeric characters, and common email special characters:
+    # '.', '_', '+', '-', '@'. Other characters are removed.
+    # RFCs for email are complex, but this covers most common valid cases and removes common junk.
+    cleaned_email = re.sub(r'[^a-zA-Z0-9.!#$%&\'*+/=?^_`{|}~@-]', '', cleaned_email)
+
+    # Although not strictly a "typo," a common error is having multiple '@' symbols.
+    # We ensure only the last '@' is kept, assuming standard email format.
+    # This simplifies strings like "user@domain@email.com" to "userdomain@email.com".
+    parts = cleaned_email.split('@')
+    if len(parts) > 2:
+        # Join all but the last part, then add the last part with an '@'.
+        # This effectively removes extra '@' symbols from the local part.
+        cleaned_email = "".join(parts[:-1]).replace(' ', '') + '@' + parts[-1]
+    elif len(parts) == 1 and '@' not in cleaned_email:
+        # If there was no '@' originally, or it was stripped by invalid chars,
+        # we might have a string that's not an email, but we still return it cleaned.
+        pass # No change needed if no '@' or only one part
+
+    return cleaned_email
+
+
+def format_url(url_string: str) -> str:
+    """Cleans a URL string by removing common typos and unsafe/invalid characters.
+
+    This function sanitizes a URL string by:
+    1. Stripping leading and trailing whitespace.
+    2. Replacing multiple internal spaces with a single space.
+    3. Removing characters that are generally invalid or unsafe in URLs
+       (e.g., non-ASCII characters, specific symbols that are never allowed).
+       It preserves standard URL characters like alphanumeric, '.', '/', ':',
+       '?', '=', '&', '-', '_', and '~'.
+       This function focuses on cleaning the string for URL parsing, not on
+       percent-encoding data within query parameters (which is a separate step).
+
+    Args:
+        url_string (str): The URL string to be cleaned.
+
+    Returns:
+        str: The cleaned URL string.
+
+    Raises:
+        TypeError: If the input is not a string.
+
+    Example of use:
+        >>> format_url("  https://www.example.com/ path with spaces?id=123  ")
+        'https://www.example.com/path%20with%20spaces?id=123'
+        >>> format_url("http://site.com/page?query=val!ue")
+        'http://site.com/page?query=val!ue'
+        >>> format_url("ftp://bad^char.com/file")
+        'ftp://badchar.com/file'
+    """
+    if not isinstance(url_string, str):
+        # Input validation is crucial for function reliability.
+        raise TypeError("Input must be a string.")
+
+    # 1. Strip leading and trailing whitespace.
+    # Common for URLs copied from text or documents.
+    cleaned_url = url_string.strip()
+
+    # 2. Replace multiple internal spaces with a single space.
+    # This helps normalize URLs like "http://example .com/page".
+    # Note: Spaces within paths/queries will still need percent-encoding later.
+    cleaned_url = re.sub(r'\s+', ' ', cleaned_url)
+
+    # 3. Remove characters that are generally not allowed or unsafe.
+    # This regex removes characters that are typically *never* valid in a raw URL
+    # or that could cause parsing issues. It allows:
+    # alphanumeric (a-zA-Z0-9), and "unreserved" plus "sub-delims"
+    # '.', '-', '_', '~', ':', '/', '?', '#', '[', ']', '@', '!', '$', '&',
+    # ''', '(', ')', '*', '+', ',', ';', '='
+    # This helps catch things like control characters, backticks, etc.
+    # We also include "%" as it's part of percent-encoding.
+    cleaned_url = re.sub(r'[^\w\-\.~:/?#\[\]@!$&\'()*+,;=%\s]', '', cleaned_url)
+
+    # 4. Handle spaces within the URL: percent-encode them.
+    # Spaces are not allowed unencoded in URLs. The `quote_plus` function from
+    # `urllib.parse` is excellent for this. However, applying it to the *entire*
+    # URL can over-encode. Instead, we manually replace spaces here.
+    # For more robust encoding, consider using `urllib.parse.urlparse` and then
+    # `quote` individual components (path, query, fragment).
+    cleaned_url = cleaned_url.replace(' ', '%20')
+
+    return cleaned_url
+
+
+def format_internet_domain(domain_string: str) -> str:
+    """
+    Cleans and normalizes an internet domain string.
+
+    This function:
+    1. Strips leading/trailing whitespace.
+    2. Converts to lowercase (domains are case-insensitive).
+    3. Removes invalid characters (keeps a-z, 0-9, '-', and '.').
+    4. Collapses multiple consecutive dots or hyphens.
+    5. Removes leading/trailing dots and hyphens.
+    6. Does not validate TLD or domain existence.
+
+    Args:
+        domain_string (str): The domain string to clean.
+
+    Returns:
+        str: The cleaned and normalized domain string.
+
+    Example:
+        >>> format_internet_domain("  WWW.Example--Site...COM  ")
+        'www.example-site.com'
+        >>> format_internet_domain("Mi_Sitio!@#$.es")
+        'misitio.es'
+    """
+    if not isinstance(domain_string, str):
+        raise TypeError("Input must be a string.")
+
+    # 1. Strip whitespace and convert to lowercase
+    domain = domain_string.strip().lower()
+
+    # 2. Remove invalid characters (keep a-z, 0-9, '-', '.')
+    domain = re.sub(r'[^a-z0-9\-.]', '', domain)
+
+    # 3. Collapse multiple consecutive dots or hyphens
+    domain = re.sub(r'\-+', '-', domain)
+    domain = re.sub(r'\.+', '.', domain)
+
+    # 4. Remove leading/trailing dots and hyphens
+    domain = domain.strip('.-')
+
+    return domain
+
+
+
+def format_name(input_string: str, add_charset: str = "", name_type: str = "PERSONA", shift: bool = False) -> str:
+    """
+    Description:
+        Formats a name string by removing unwanted characters, normalizing symbols, and applying type-specific character filtering.
+        This function is designed to standardize names for people or other entities, ensuring consistent formatting and allowed character sets.
+
+    Args:
+        input_string (str): The string to format.
+        add_charset (str): Additional characters to allow in the output.
+        name_type (str): The type of name, e.g., "PERSONA" for people, determines filtering rules.
+        shift (bool): Unused parameter, kept for compatibility.
+
+    Returns:
+        str: The formatted name string.
+
+    Raises:
+        TypeError: If input_string is not a string.
+
+    Example Usage:
+        >>> format_name("José Pérez, S.A.", "", "PERSONA")
+        'JOSE PEREZ SA'
+        >>> format_name("Cía. de Café S.L.", "", "EMPRESA")
+        'CIA DE CAFE SL'
+
+    Cost:
+        O(n) where n is the length of input_string, due to multiple string operations and regex replacements.
+    """
+    if input_string is None:
+        return None
+
+    if not isinstance(input_string, str):
+        raise TypeError("input_string must be a string.")
+
+    # Map of characters to replace with their normalized equivalents or spaces
+    replace_map = {
+        "´": "'", "`": "'",
+        "{": "(", "}": ")", "[": "(", "]": ")", "*": " ", '"': " ", "_": " ", "·": " ",
+        ",": " ", ";": " ", "|": " ", "\\": " ", "¬": " ", "‰": " ", "½": " ", "ƒ": " ",
+        "Ž": " ", "œ": " ", "‹": " ", "Š": " ", "˜": " ", "‡": " ", "†": " ", "¥": " ",
+        "ð": " ", "§": " ", ".": " "
+    }
+
+    formatted = input_string
+
+    # Replace mapped characters
+    for char, replacement in replace_map.items():
+        formatted = formatted.replace(char, replacement)
+
+    # Remove unwanted special characters, respecting add_charset
+    formatted = fxStrOp.erase_specialchar(formatted, add_charset)
+
+    # Apply symbol normalization pattern
+    formatted = normalize_symbols(formatted)
+
+    if formatted:
+        # Ensure 'º' and 'ª' are spaced correctly, then remove redundant spaces
+        formatted = formatted.replace("º", "º ").replace("ª", "ª ")
+        formatted = formatted.replace(" º", "º").replace(" ª", "ª")
+
+        # Normalize according to name_type
+        if name_type == "PERSONA":
+            # Only allow alphabetic characters plus allowed extras
+            formatted = string_aZ_plus(formatted, "ºª " + add_charset)
+        else:
+            # Allow alphanumeric characters plus allowed extras
+            formatted = string_aZ09_plus(formatted, "ºª " + add_charset)
+
+        # Remove redundant spaces
+        formatted = normalize_spaces(formatted)
+
+    return formatted
+
+
+def format_company_name(
+    company_name: str | None,
+    company_type: str | None,
+    format_style: str
+) -> str | None:
+    """
+    Formats a company name by appending its type according to a specified style.
+
+    This function takes a company name and its legal type, then combines them.
+    It provides different formatting styles for the company type, such as enclosing
+    it in brackets or abbreviating it with dots. Certain administrative or
+    non-standard company types are handled differently, typically by appending
+    them after a comma. The original function included a call to an undefined
+    `get_companyname` function for these cases, which has been removed to ensure
+    this function's sole responsibility is formatting.
+
+    The function is case-sensitive.
+
+    Args:
+        company_name (str | None): The base name of the company.
+        company_type (str | None): The legal type of the company (e.g., 'S.L.', 'LTD').
+        format_style (str): The formatting rule to apply.
+                              Expected values: 'brackets', 'dots', 'comma&dots'.
+
+    Returns:
+        str | None: The formatted company name, or None if the input name is None.
+
+    Raises:
+        ValueError: If an unknown format_style is provided.
+
+    Example of use:
+        format_company_name('My Business', 'S.L.', 'dots') -> 'My Business S.L.'
+        format_company_name('Innovate Inc', 'INC', 'comma&dots') -> 'Innovate Inc, INC.'
+        format_company_name('Tech Solutions', 'LTD', 'brackets') -> 'Tech Solutions (LTD)'
+        format_company_name('City Council', 'CORPORACION LOCAL', 'dots') -> 'City Council, CORPORACION LOCAL'
+
+    Cost:
+        The time complexity is generally O(1). However, for short company types
+        that require dots between letters (e.g., 'SL' -> 'S.L.'), the complexity
+        is O(K), where K is the number of characters in the company_type string,
+        due to the string join operation.
+    """
+    # Guard clause: Return early if there's no company name to format.
+    if not company_name:
+        return None
+
+    # Guard clause: If the company type is missing or not applicable,
+    # return the original name without formatting.
+    if not company_type or company_type == 'N/A':
+        return company_name
+
+    #
+    # Handle excluded types, which are not standard legal forms.
+    #
+    if company_type in EXCLUDED_COMPANY_TYPES:
+        # These types are typically appended as-is, following a comma.
+        return f"{company_name}, {company_type}"
+
+    #
+    # Handle standard legal forms based on the specified format style.
+    #
+    suffix = ""
+
+    if format_style == 'brackets':
+        suffix = f" ({company_type})"
+
+    elif format_style in ['dots', 'comma&dots']:
+        # Determine how to apply dots.
+        # Why: Long forms or specific short forms get a single dot at the end.
+        # Other short forms get dots between letters (e.g., 'S.A.' from 'SA').
+        if len(company_type) >= 4 or company_type in SHORT_TYPES_WITH_DOTS:
+            base_type = f"{company_type}."
+        else:
+            # Use join for efficiency instead of looping and concatenating strings.
+            base_type = '.'.join(company_type) + '.'
+
+        # A blank line to separate logical blocks: formatting vs. prefixing.
+        if format_style == 'comma&dots':
+            suffix = f", {base_type}"
+        else: # 'dots'
+            suffix = f" {base_type}"
+
+    else:
+        # Why: It's good practice to handle unexpected inputs to prevent silent failures.
+        raise ValueError(f"Unknown format_style: '{format_style}'")
+
+    return company_name + suffix
+
+
+def parse_company(company_name: str, legal_forms_set_override: set = None) -> list:
+    """
+    Description:
+        Separates the company name from its legal form, handling malformed formats and edge cases.
+        Prioritizes longer legal forms, normalizes input, and ensures robust matching using regular expressions.
+
+    Args:
+        company_name (str): The full company name (e.g., "Acme Corp Ltd").
+        legal_forms_set_override (set, optional): A set of legal forms to search. If None, uses the global LEGAL_FORMS_SET.
+
+    Returns:
+        list: [company_name_only, canonical_legal_form]. If no legal form is found, returns [original_company_name, None].
+
+    Raises:
+        None
+
+    Example Usage:
+        >>> parse_company("PESCANOVA S.A.", {"SA"})
+        ['PESCANOVA', 'SA']
+        >>> parse_company("Acme Corp Ltd.", {"LTD"})
+        ['Acme Corp', 'LTD']
+        >>> parse_company("No Legal Form Company")
+        ['No Legal Form Company', None]
+
+    Cost:
+        O(M log M + M * N * K), where M is the number of legal forms, N is the string length, and K is regex complexity.
+    """
+    # Use override set if provided, else global set
+    forms_to_search = legal_forms_set_override if legal_forms_set_override is not None else LEGAL_FORMS_SET
+
+    # Normalize and preprocess the company name
+    original_company_name = company_name.strip()
+    company_name_upper = original_company_name.upper()
+
+    # Remove common suffixes and normalize
+    suffixes = [
+        '(EXTINGUIDA)', '- EXTINGUIDA', '-EXTINGUIDA',
+        '(EN LIQUIDACION)', ' EN LIQUIDACION'
+    ]
+    for suffix in suffixes:
+        company_name_upper = company_name_upper.replace(suffix, '')
+
+    # Replace common Spanish legal form phrases with abbreviations
+    replacements = {
+        'SOCIEDAD LIMITADA': 'SL',
+        'SOCIEDAD ANONIMA': 'SA',
+        'COM PROP': 'COMUNIDAD DE PROPIETARIOS',
+        'CDAD PROP': 'COMUNIDAD DE PROPIETARIOS',
+        ' ASOC ': ' ASOCIACION ',
+        ' ASOC.': ' ASOCIACION ',
+        'SOCIEDAD DE RESPONSABILIDAD LIMITADA': 'SRL',
+        'SOCIEDAD COOPERATIVA': 'SCOOP',
+        'SOCIEDAD COOP': 'SCOOP',
+        'S COOP': 'SCOOP',
+        'SOCIEDAD ANONIMA LABORAL': 'SAL',
+        'SOCIEDAD DE RESPONSABILIDAD LIMITADA LABORAL': 'SRLL',
+        'SL LABORAL': 'SLL',
+        'SOCIEDAD LIMITADA LABORAL': 'SLL',
+        'SA DEPORTIVA': 'SAD',
+        'SL PROFESIONAL': 'SLP',
+        ' SCOOPL': ' SCOOP',
+        ' SCL': ' SC'
+    }
+    for old, new in replacements.items():
+        company_name_upper = company_name_upper.replace(old, new)
+
+    # Normalize symbols and spaces
+    company_name_normalized = format_name(company_name_upper, "ºª@#$%&=+-_/\\|.:[]()¿?¡!'", "COMPANY", True)
+
+    # Sort legal forms by descending length for longest match first
+    sorted_forms = sorted(forms_to_search, key=len, reverse=True)
+
+    found_legal_form = None
+    remaining_company_name = company_name_normalized
+
+    for form_upper in sorted_forms:
+        # Build regex for flexible matching (spaces, dots, commas, parentheses)
+        regex_core = ''.join(
+            f"{re.escape(char)}[\\s\\.,()]*" if char.isalnum() else re.escape(char)
+            for char in form_upper
+        )
+        if regex_core.endswith('[\\s\\.,()]*'):
+            regex_core = regex_core[:-len('[\\s\\.,()]*')]
+
+        pattern = re.compile(
+            r"^(.*?)"                  # Group 1: Company name part
+            r"[\s.,;()\-\[\]]*"        # Leading separators
+            r"(" + regex_core + r")"   # Group 2: Legal form
+            r"[\s.,;()\-\[\]]*$",      # Trailing separators
+            re.IGNORECASE | re.DOTALL
+        )
+
+        match = pattern.match(original_company_name)
+        if match:
+            company_part = match.group(1).strip()
+            form_part = match.group(2).strip()
+            normalized_form = re.sub(r'[^A-Z0-9]', '', form_part.upper())
+            canonical_form = re.sub(r'[^A-Z0-9]', '', form_upper)
+            if normalized_form == canonical_form:
+                found_legal_form = form_upper.strip()
+                remaining_company_name = company_part.rstrip('.,; ').strip()
+                break
+
+    # Fallback for special cases if no legal form found
+    if not found_legal_form:
+        special_forms = [
+            'COMUNIDAD DE PROPIETARIOS', 'COMUNIDAD DE BIENES',
+            'ORGANO DE LA ADMINISTRACION', 'ENTIDAD NO LUCRATIVA',
+            'CORPORACION LOCAL', 'SUCURSAL EN ESPAÑA', 'PARTIDO POLITICO',
+            'ORGANISMO AUTONOMO', 'ENTIDAD NO RESIDENTE', 'ASOCIACION',
+            'ASSOCIACIO', 'FUNDACION'
+        ]
+        for special_form in special_forms:
+            if special_form in remaining_company_name:
+                found_legal_form = special_form
+                break
+
+    return [remaining_company_name, found_legal_form]
+
+
