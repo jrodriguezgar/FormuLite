@@ -225,3 +225,14 @@ tests/
 # Specific files
 pyproject.toml
 how_to_use_it.py
+
+
+# Excluir directorios de proyecto, tests y documentación
+.github/
+.vscode/
+project_structure.txt
+pyproject.toml
+tests/
+doc/
+notebooks/
+ToDo/

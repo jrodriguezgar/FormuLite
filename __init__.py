@@ -25,7 +25,6 @@ from .fxDate.date_sys import *
 from .fxNumeric.numeric_convertions import *
 from .fxNumeric.numeric_operations import *
 
-from .fxPython.py_classes import *
 from .fxPython.py_convertions import *
 from .fxPython.py_operations import *
 from .fxPython.py_tools import *
