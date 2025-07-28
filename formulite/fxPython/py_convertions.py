@@ -1,6 +1,6 @@
 import json
 from typing import Iterable, Callable, Any, Union, List, Tuple, Set, Dict, Tuple, Union, Type, Optional
-
+from pydantic import BaseModel, Field, create_model
 
 def replace_void(primary_value: Any, replacement_value: Any = 'NaN') -> Any:
     """Replaces empty or None values with a specified replacement value.
@@ -670,4 +670,215 @@ def list_of_dicts_to_merged_dict(list_of_dicts: List[Dict[Any, Any]]) -> Dict[An
     for d in list_of_dicts:
         merged_dict.update(d)
     return merged_dict
+
+
+def json_schema_to_pydantic_model(
+    json_schema: Dict[str, Any], model_name: str = "DynamicModel"
+) -> Type[BaseModel]:
+    """
+    Converts a JSON schema dictionary into a Pydantic BaseModel class.
+
+    This function dynamically creates a Pydantic model based on the provided
+    JSON schema, mapping schema properties to Pydantic fields. It supports
+    basic types, nested objects, arrays, and common validation constraints.
+
+    Args:
+        json_schema (Dict[str, Any]): The JSON schema dictionary to convert.
+                                       Must contain 'type': 'object' and 'properties'.
+        model_name (str, optional): The name of the Pydantic model class to be created.
+                                    Defaults to "DynamicModel".
+
+    Returns:
+        Type[BaseModel]: A Pydantic BaseModel class generated from the JSON schema.
+
+    Raises:
+        ValueError: If the 'json_schema' is not a dictionary, or if it's missing
+                    'type' or 'properties' for an object schema.
+
+    Example usage:
+        >>> user_schema = {
+        ...     "title": "User",
+        ...     "description": "Schema for a user object",
+        ...     "type": "object",
+        ...     "properties": {
+        ...         "name": {"type": "string", "minLength": 1, "description": "User's full name"},
+        ...         "age": {"type": "integer", "minimum": 0, "maximum": 120, "description": "User's age"},
+        ...         "email": {"type": "string", "format": "email", "pattern": "^.+@.+\\..+$"},
+        ...         "is_active": {"type": "boolean", "default": True},
+        ...         "address": {
+        ...             "type": "object",
+        ...             "properties": {
+        ...                 "street": {"type": "string"},
+        ...                 "city": {"type": "string"}
+        ...             },
+        ...             "required": ["street", "city"]
+        ...         },
+        ...         "tags": {
+        ...             "type": "array",
+        ...             "items": {"type": "string"}
+        ...         },
+        ...         "hobbies": {
+        ...             "type": "array",
+        ...             "items": {
+        ...                 "type": "object",
+        ...                 "properties": {
+        ...                     "name": {"type": "string"},
+        ...                     "difficulty": {"type": "integer", "minimum": 1, "maximum": 5}
+        ...                 },
+        ...                 "required": ["name", "difficulty"]
+        ...             }
+        ...         }
+        ...     },
+        ...     "required": ["name", "email"]
+        ... }
+        >>> User = json_schema_to_pydantic_model(user_schema, "User")
+        >>> user_data = {
+        ...     "name": "Alice Smith",
+        ...     "age": 30,
+        ...     "email": "alice@example.com",
+        ...     "address": {"street": "123 Main St", "city": "Anytown"},
+        ...     "tags": ["developer", "python"],
+        ...     "hobbies": [{"name": "reading", "difficulty": 2}]
+        ... }
+        >>> user_instance = User(**user_data)
+        >>> print(user_instance.name)
+        Alice Smith
+        >>> print(user_instance.is_active)
+        True
+
+    Cost:
+        The cost of this function is primarily determined by the depth and number
+        of properties in the JSON schema. In the worst case, for a schema with `N`
+        properties and a maximum nesting depth of `D`, the complexity is roughly
+        O(N*D) due to recursive calls for nested objects and array items.
+    """
+    if not isinstance(json_schema, dict):
+        raise ValueError("Input 'json_schema' must be a dictionary.")
+    if json_schema.get("type") != "object":
+        raise ValueError(
+            "The root of the JSON schema must have 'type': 'object' to be converted to a Pydantic model."
+        )
+    if "properties" not in json_schema:
+        raise ValueError(
+            "JSON schema for an object must contain a 'properties' key."
+        )
+
+    fields: Dict[str, Any] = {}
+    required_fields: List[str] = json_schema.get("required", [])
+
+    # Iterate through each property defined in the JSON schema.
+    for prop_name, prop_schema in json_schema["properties"].items():
+        field_type: Any = Any  # Default to Any if type is not specified or recognized
+        pydantic_field_kwargs: Dict[str, Any] = {}
+
+        # Determine the base Python type based on the JSON schema 'type'.
+        json_type = prop_schema.get("type")
+
+        if json_type == "string":
+            field_type = str
+            if "minLength" in prop_schema:
+                pydantic_field_kwargs["min_length"] = prop_schema["minLength"]
+            if "maxLength" in prop_schema:
+                pydantic_field_kwargs["max_length"] = prop_schema["maxLength"]
+            if "pattern" in prop_schema:
+                pydantic_field_kwargs["pattern"] = prop_schema["pattern"]
+            # 'format' like "email", "uri" are handled implicitly by Pydantic if type is str
+            # and may require specific Pydantic types or validators, but for
+            # basic conversion, str is sufficient.
+        elif json_type == "integer":
+            field_type = int
+            if "minimum" in prop_schema:
+                pydantic_field_kwargs["ge"] = prop_schema["minimum"]  # Greater than or equal
+            if "maximum" in prop_schema:
+                pydantic_field_kwargs["le"] = prop_schema["maximum"]  # Less than or equal
+        elif json_type == "number":
+            field_type = float  # Pydantic's 'number' maps to float
+            if "minimum" in prop_schema:
+                pydantic_field_kwargs["ge"] = prop_schema["minimum"]
+            if "maximum" in prop_schema:
+                pydantic_field_kwargs["le"] = prop_schema["maximum"]
+        elif json_type == "boolean":
+            field_type = bool
+        elif json_type == "array":
+            items_schema = prop_schema.get("items")
+            if items_schema:
+                if items_schema.get("type") == "object":
+                    # Recursively create a model for complex array items
+                    item_model_name = (
+                        f"{model_name}{prop_name.replace('_', '').title()}Item"
+                    )
+                    field_type = List[
+                        json_schema_to_pydantic_model(items_schema, item_model_name)
+                    ]
+                else:
+                    # Map primitive array item types
+                    primitive_item_type_map = {
+                        "string": str,
+                        "integer": int,
+                        "number": float,
+                        "boolean": bool,
+                    }
+                    item_type = primitive_item_type_map.get(
+                        items_schema.get("type", ""), Any
+                    )
+                    field_type = List[item_type]
+            else:
+                field_type = List[Any]  # Default to list of Any if no items schema
+        elif json_type == "object":
+            # Recursively call the function to create a nested Pydantic model
+            nested_model_name = f"{model_name}{prop_name.replace('_', '').title()}"
+            field_type = json_schema_to_pydantic_model(
+                prop_schema, nested_model_name
+            )
+        else:
+            # For unsupported or unknown types, default to Any.
+            # This allows the model to be created but provides less strict validation.
+            field_type = Any
+
+        # Add description if available
+        if "description" in prop_schema:
+            pydantic_field_kwargs["description"] = prop_schema["description"]
+
+        # Add default value if available
+        if "default" in prop_schema:
+            pydantic_field_kwargs["default"] = prop_schema["default"]
+
+        # Handle 'enum' by creating a Union of literals or simply checking against a set.
+        # Pydantic Field doesn't directly support enum validation like this without
+        # a dedicated Enum class or Literal types. For simplicity, we'll
+        # just add the enum list to the Field metadata.
+        # A more robust solution might dynamically create an Enum.
+        if "enum" in prop_schema:
+            pydantic_field_kwargs["json_schema_extra"] = {
+                "enum": prop_schema["enum"]
+            }
+
+        # Determine if the field is required or optional
+        is_required = prop_name in required_fields
+
+        if pydantic_field_kwargs:
+            # If there are any Pydantic Field arguments, use Field.
+            # We use `Optional` for non-required fields that don't have a default.
+            # If a default is provided, Pydantic handles optionality.
+            if not is_required and "default" not in pydantic_field_kwargs:
+                fields[prop_name] = (Optional[field_type], Field(None, **pydantic_field_kwargs))
+            else:
+                fields[prop_name] = (field_type, Field(**pydantic_field_kwargs))
+        else:
+            # If no special Pydantic Field arguments, simply assign the type.
+            # Handle optionality.
+            if not is_required:
+                fields[prop_name] = (Optional[field_type], None) # None for Pydantic's default optional
+            else:
+                fields[prop_name] = field_type
+
+    # Create the Pydantic model dynamically.
+    model_class = create_model(
+        model_name,
+        __base__=BaseModel,
+        __doc__=json_schema.get("description", f"Pydantic model generated from JSON schema for {model_name}."),
+        **fields,
+    )
+
+    return model_class
 

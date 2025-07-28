@@ -236,3 +236,5 @@ tests/
 doc/
 notebooks/
 ToDo/
+
+secrets.toml

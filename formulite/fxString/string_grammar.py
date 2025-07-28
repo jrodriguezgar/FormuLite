@@ -1,66 +1,77 @@
 import sys
+import os
+import subprocess
 import importlib
-from typing import Union, List, Dict, Any, Tuple
+from typing import Union, List, Dict, Any, Tuple, Optional
 from collections import deque
 
-# Diccionario para almacenar módulos importados de forma "lazy"
-_lazy_loaded_modules = {}
-
-def _lazy_import(module_name: str, package_name: str = None):
+def install_library(library_name: str, package_name: str = None) -> bool:
     """
-    Intenta importar un módulo de forma perezosa. Si el módulo no está
-    disponible, imprime un mensaje sugiriendo la instalación con pip.
+    Checks if a library is installed and, if not, attempts to install it via pip.
 
     Args:
-        module_name (str): El nombre del módulo a importar (ej. 'metaphone').
-        package_name (str): El nombre del paquete para la instalación de pip
-                            si es diferente al module_name (ej. 'python-Levenshtein').
-                            Si es None, se usa module_name.
+        library_name (str): The name of the library to check and install.
+        package_name (str, optional): The pip package name if different from library_name.
 
     Returns:
-        module: El módulo importado.
+        bool: True if the library is available or was successfully installed,
+              False otherwise.
+    """
+    try:
+        # Try to import the library first
+        module = __import__(library_name)
+        return True
+    except ImportError:
+        print(f"Library '{library_name}' not found. Attempting to install...")
+        try:
+            install_name = package_name if package_name else library_name
+            subprocess.check_call([sys.executable, "-m", "pip", "install", install_name])
+            print(f"Library '{library_name}' installed successfully.")
+            return True
+        except subprocess.CalledProcessError:
+            print(f"Error: Failed to install '{library_name}'.")
+            return False
+            
+# All library imports are now handled through install_library() in each method
+# where they are needed, following the pattern from connector_genai.py
+
+    Returns:
+        module: The imported module.
 
     Raises:
-        ImportError: Si el módulo no se puede importar después de la sugerencia.
+        ImportError: If the module cannot be imported after the attempt to install.
     """
-    if module_name in _lazy_loaded_modules:
-        return _lazy_loaded_modules[module_name]
+    if module_name in _cached_modules:
+        return _cached_modules[module_name]
 
     try:
         module = importlib.import_module(module_name)
-        _lazy_loaded_modules[module_name] = module
+        _cached_modules[module_name] = module
         return module
     except ImportError:
-        install_name = package_name if package_name else module_name
-        print(f"Error: La librería '{module_name}' no está instalada.")
-        print(f"Por favor, instálala usando: pip install {install_name}")
-        # En un entorno real, podrías intentar instalarla aquí,
-        # pero en este entorno restringido, solo podemos sugerirlo.
-        import subprocess
-        try:
-            subprocess.check_call([sys.executable, "-m", "pip", "install", install_name])
-            module = importlib.import_module(module_name)
-            _lazy_loaded_modules[module_name] = module
-            return module
-        except Exception as e:
-            print(f"No se pudo instalar '{install_name}' automáticamente: {e}")
-            #raise
-        raise # Re-lanza el error para que el programa sepa que la dependencia no está disponible
+        if install_library(module_name, package_name):
+            try:
+                module = importlib.import_module(module_name)
+                _cached_modules[module_name] = module
+                return module
+            except ImportError as e:
+                print(f"Error importing {module_name} after installation: {e}")
+                raise
+        raise ImportError(f"Could not import or install {module_name}")
 
 # Definiciones de clases y funciones
 
 class WordSimilarity:
-    """
-    Clase para calcular similitudes entre palabras o frases usando una variedad
-    de algoritmos de distancia y similitud de cadenas.
+    """Calculate similarities between words or phrases using various string algorithms.
 
-    Ofrece métodos para:
-      - Similitud fonética (Metaphone).
-      - Similitud de edición (Levenshtein, Hamming, Needleman-Wunsch).
-      - Similitud basada en subsecuencias y patrones (Ratcliff-Obershelp, LCS).
-      - Similitud basada en tokens (Sørensen-Dice, Jaccard).
-      - Similitud fonética avanzada (Match Rating Approach - MRA).
-      - Similitud de prefijo (Jaro-Winkler).
+    Provides methods for:
+    1. Phonetic similarity with Metaphone
+    2. Edit distance with Levenshtein, Hamming, and Needleman-Wunsch
+    3. Pattern matching with Ratcliff-Obershelp and LCS
+    4. Token-based similarity with Sørensen-Dice and Jaccard
+    5. Advanced phonetic matching with MRA
+    6. Prefix similarity with Jaro-Winkler
+    """
 
     Atributos:
         nw_gap_cost (int): Costo de 'gap' para el algoritmo de Needleman-Wunsch.
@@ -125,8 +136,11 @@ class WordSimilarity:
         """
         if not isinstance(nw_gap_cost, int) or nw_gap_cost < 0:
             raise ValueError("nw_gap_cost debe ser un entero no negativo.")
-        td = _lazy_import('textdistance') # Importación perezosa
-        td.needleman_wunsch.gap_cost = nw_gap_cost
+        if install_library('textdistance'):
+            import textdistance as td
+            td.needleman_wunsch.gap_cost = nw_gap_cost
+        else:
+            raise ImportError("Could not import textdistance")
 
     @staticmethod
     def metaphone_similarity(word1: str, word2: str) -> bool:
@@ -156,10 +170,13 @@ class WordSimilarity:
         """
         if not isinstance(word1, str) or not isinstance(word2, str):
             raise TypeError("Ambos argumentos deben ser cadenas de texto.")
-        metaphone = _lazy_import('metaphone') # Importación perezosa
-        meta1 = metaphone.doublemetaphone(word1.lower()) # Convertir a minúsculas para consistencia
-        meta2 = metaphone.doublemetaphone(word2.lower()) # Convertir a minúsculas para consistencia
-        return any(m in meta2 for m in meta1 if m)
+        if install_library('metaphone'):
+            import metaphone
+            meta1 = metaphone.doublemetaphone(word1.lower()) # Convertir a minúsculas para consistencia
+            meta2 = metaphone.doublemetaphone(word2.lower()) # Convertir a minúsculas para consistencia
+            return any(m in meta2 for m in meta1 if m)
+        else:
+            raise ImportError("Could not import metaphone")
 
     @staticmethod
     def levenshtein_similarity(word1: str, word2: str) -> float:
@@ -192,8 +209,11 @@ class WordSimilarity:
         """
         if not isinstance(word1, str) or not isinstance(word2, str):
             raise TypeError("Ambos argumentos deben ser cadenas de texto.")
-        Levenshtein = _lazy_import('Levenshtein', 'python-Levenshtein') # Importación perezosa
-        return Levenshtein.ratio(word1, word2)
+        if install_library('Levenshtein', 'python-Levenshtein'):
+            import Levenshtein
+            return Levenshtein.ratio(word1, word2)
+        else:
+            raise ImportError("Could not import Levenshtein")
 
     @staticmethod
     def hamming_similarity(word1: str, word2: str) -> float:
@@ -232,9 +252,12 @@ class WordSimilarity:
             raise ValueError("Para Hamming, ambas palabras deben tener la misma longitud.")
         if not word1: # Si ambas son cadenas vacías, la distancia es 0, similitud 1.0
             return 1.0
-        jellyfish = _lazy_import('jellyfish') # Importación perezosa
-        dist = jellyfish.hamming_distance(word1, word2)
-        return 1 - dist / len(word1)
+        if install_library('jellyfish'):
+            import jellyfish
+            dist = jellyfish.hamming_distance(word1, word2)
+            return 1 - dist / len(word1)
+        else:
+            raise ImportError("Could not import jellyfish")
 
     @staticmethod
     def ratcliff_obershelp_score(a: str, b: str) -> Dict[str, float]:
@@ -264,14 +287,17 @@ class WordSimilarity:
         """
         if not isinstance(a, str) or not isinstance(b, str):
             raise TypeError("Ambos argumentos deben ser cadenas de texto.")
-        td = _lazy_import('textdistance') # Importación perezosa
-        d = td.ratcliff_obershelp
-        return {
-            'distance': d.distance(a, b),
-            'similarity': d.similarity(a, b),
-            'normalized_similarity': d.normalized_similarity(a, b),
-            'score': 100.0 * d.normalized_similarity(a, b)
-        }
+        if install_library('textdistance'):
+            import textdistance as td
+            d = td.ratcliff_obershelp
+            return {
+                'distance': d.distance(a, b),
+                'similarity': d.similarity(a, b),
+                'normalized_similarity': d.normalized_similarity(a, b),
+                'score': 100.0 * d.normalized_similarity(a, b)
+            }
+        else:
+            raise ImportError("Could not import textdistance")
 
     @staticmethod
     def sorensen_dice_score(a: str, b: str) -> Dict[str, float]:
@@ -305,8 +331,9 @@ class WordSimilarity:
         if not isinstance(a, str) or not isinstance(b, str):
             raise TypeError("Ambos argumentos deben ser cadenas de texto.")
         tokens_a, tokens_b = a.lower().split(), b.lower().split() # Convertir a minúsculas y tokenizar
-        td = _lazy_import('textdistance') # Importación perezosa
-        d = td.sorensen
+        if install_library('textdistance'):
+            import textdistance as td
+            d = td.sorensen
         return {
             'distance': d.distance(tokens_a, tokens_b),
             'similarity': d.similarity(tokens_a, tokens_b),
@@ -343,14 +370,17 @@ class WordSimilarity:
         """
         if not isinstance(a, str) or not isinstance(b, str):
             raise TypeError("Ambos argumentos deben ser cadenas de texto.")
-        td = _lazy_import('textdistance') # Importación perezosa
-        d = td.mra
-        return {
-            'distance': d.distance(a, b),
-            'similarity': d.similarity(a, b),
-            'normalized_similarity': d.normalized_similarity(a, b),
-            'score': 100.0 * d.normalized_similarity(a, b)
-        }
+        if install_library('textdistance'):
+            import textdistance as td
+            d = td.mra
+            return {
+                'distance': d.distance(a, b),
+                'similarity': d.similarity(a, b),
+                'normalized_similarity': d.normalized_similarity(a, b),
+                'score': 100.0 * d.normalized_similarity(a, b)
+            }
+        else:
+            raise ImportError("Could not import textdistance")
 
     @staticmethod
     def needleman_wunsch_score(a: str, b: str) -> Dict[str, float]:
@@ -382,14 +412,17 @@ class WordSimilarity:
         """
         if not isinstance(a, str) or not isinstance(b, str):
             raise TypeError("Ambos argumentos deben ser cadenas de texto.")
-        td = _lazy_import('textdistance') # Importación perezosa
-        d = td.needleman_wunsch
-        return {
-            'distance': d.distance(a, b),
-            'similarity': d.similarity(a, b),
-            'normalized_similarity': d.normalized_similarity(a, b),
-            'score': 100.0 * d.normalized_similarity(a, b)
-        }
+        if install_library('textdistance'):
+            import textdistance as td
+            d = td.needleman_wunsch
+            return {
+                'distance': d.distance(a, b),
+                'similarity': d.similarity(a, b),
+                'normalized_similarity': d.normalized_similarity(a, b),
+                'score': 100.0 * d.normalized_similarity(a, b)
+            }
+        else:
+            raise ImportError("Could not import textdistance")
 
     @staticmethod
     def jaro_winkler_score(a: str, b: str) -> Dict[str, float]:
@@ -420,14 +453,17 @@ class WordSimilarity:
         """
         if not isinstance(a, str) or not isinstance(b, str):
             raise TypeError("Ambos argumentos deben ser cadenas de texto.")
-        td = _lazy_import('textdistance') # Importación perezosa
-        d = td.jaro_winkler
-        return {
-            'distance': d.distance(a, b),
-            'similarity': d.similarity(a, b),
-            'normalized_similarity': d.normalized_similarity(a, b),
-            'score': 100.0 * d.normalized_similarity(a, b)
-        }
+        if install_library('textdistance'):
+            import textdistance as td
+            d = td.jaro_winkler
+            return {
+                'distance': d.distance(a, b),
+                'similarity': d.similarity(a, b),
+                'normalized_similarity': d.normalized_similarity(a, b),
+                'score': 100.0 * d.normalized_similarity(a, b)
+            }
+        else:
+            raise ImportError("Could not import textdistance")
 
     @staticmethod
     def jaccard_score(a: str, b: str) -> Dict[str, float]:
