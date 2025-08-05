@@ -598,6 +598,167 @@ def collection_filter(
         return filtered_items
     
 
+def dictionary_filter_by_keys(input_dict: dict, keys_to_include: list) -> dict:
+    """Filters a dictionary, returning a new dictionary with only the specified keys.
+
+    This function iterates through a provided list of keys and creates a new dictionary
+    containing only the key-value pairs where the key exists in the original dictionary.
+    This is highly useful for preparing a subset of data for serialization or other
+    processing.
+
+    Args:
+        input_dict (dict): The original dictionary to filter.
+        keys_to_include (list): A list of keys (strings) that should be included
+                                 in the new, filtered dictionary.
+
+    Returns:
+        dict: A new dictionary containing only the key-value pairs
+              corresponding to the `keys_to_include`.
+
+    Raises:
+        TypeError: If input_dict is not a dictionary or keys_to_include is not a list.
+
+    Example of use:
+        original_data = {"name": "Charlie", "age": 45, "city": "London", "email": "charlie@example.com"}
+        desired_keys = ["name", "city", "country"] # 'country' is not in original_data
+
+        filtered_data = dictionary_filter_by_keys(original_data, desired_keys)
+        print(f"Filtered data: {filtered_data}")
+        # Expected output: {'name': 'Charlie', 'city': 'London'}
+
+        # This output can now be passed to our JSON conversion functions:
+        # from your_module import any_to_json_string # Assuming it's in a module
+        # json_string = any_to_json_string(filtered_data, indent=2)
+        # print(json_string)
+    """
+    if not isinstance(input_dict, dict):
+        #raise TypeError("Input 'input_dict' must be a dictionary.")
+        return None
+    
+    if not isinstance(keys_to_include, list):
+        #raise TypeError("Input 'keys_to_include' must be a list of strings.")
+        return None
+
+    # A dictionary comprehension is the most Pythonic and efficient way to build
+    # a new dictionary from an existing one based on certain conditions.
+    # It ensures only the requested keys that are present in the input_dict are included.
+    # Cost: O(M) where M is the number of keys in `keys_to_include`.
+    # In the worst case, M could be equal to the number of keys in `input_dict`.
+    filtered_dict = {key: input_dict[key] for key in keys_to_include if key in input_dict}
+
+    return filtered_dict
+
+
+def combine_dictionaries(dict_one: dict, dict_two: dict, operation: str) -> dict:
+    """
+    Performs union or intersection operations on two dictionaries.
+
+    This function takes two dictionaries and an operation type ('union' or 'intersection')
+    to return a new dictionary based on the specified operation.
+
+    Args:
+        dict_one (dict): The first dictionary.
+        dict_two (dict): The second dictionary.
+        operation (str): The type of operation to perform. Must be 'union' or 'intersection'.
+
+    Returns:
+        dict: A new dictionary resulting from the specified operation.
+
+    Raises:
+        ValueError: If an unsupported operation type is provided.
+
+    Example of use:
+        dict_a = {'a': 1, 'b': 2, 'c': 3}
+        dict_b = {'b': 4, 'd': 5}
+
+        union_result = combine_dictionaries(dict_a, dict_b, 'union')
+        # Expected: {'a': 1, 'b': 4, 'c': 3, 'd': 5}
+
+        intersection_result = combine_dictionaries(dict_a, dict_b, 'intersection')
+        # Expected: {'b': 4}
+
+    Cost:
+        O(N + M) for union (where N and M are the number of items in dict_one and dict_two respectively)
+        O(min(N, M)) for intersection (iterating over the smaller dictionary's keys)
+    """
+    # Ensure the operation type is valid before proceeding.
+    if operation not in ['union', 'intersection']:
+        raise ValueError("Unsupported operation. Choose 'union' or 'intersection'.")
+
+    if operation == 'union':
+        # The union operation leverages dictionary unpacking.
+        # This creates a new dictionary by first unpacking dict_one,
+        # and then unpacking dict_two. If there are common keys,
+        # the values from dict_two will overwrite those from dict_one,
+        # which aligns with the definition of dictionary union in this context.
+        return {**dict_one, **dict_two}
+    else:  # operation == 'intersection'
+        result_dict = {}
+        # Iterate over the keys of the first dictionary.
+        # This is generally efficient for finding common keys.
+        for key, value in dict_one.items():
+            # If a key exists in both dictionaries, add it to the result.
+            # We take the value from dict_two for consistency, similar to how
+            # union handles overwrites.
+            if key in dict_two:
+                result_dict[key] = dict_two[key]
+        return result_dict
+    
+    
+def dictionary_rename_keys(original_dict: dict, key_mapping: dict) -> dict:
+    """Renames keys in a dictionary based on a provided mapping.
+
+    This function iterates through the original dictionary's items. If a key
+    exists in the `key_mapping`, its corresponding value from the mapping is
+    used as the new key in the new dictionary. Keys not found in the mapping
+    are kept as is. This approach creates a new dictionary, leaving the
+    original dictionary unchanged.
+
+    Args:
+        original_dict: The dictionary whose keys are to be renamed.
+        key_mapping: A dictionary where keys are old key names and values are
+                     the new key names.
+
+    Returns:
+        A new dictionary with the keys renamed according to the `key_mapping`.
+
+    Raises:
+        TypeError: If `original_dict` or `key_mapping` are not dictionaries.
+
+    Example of use:
+        >>> my_dict = {"name": "Alice", "age": 30}
+        >>> mapping = {"name": "full_name", "age": "person_age"}
+        >>> renamed_dict = dictionary_rename_keys(my_dict, mapping)
+        >>> print(renamed_dict)
+        {'full_name': 'Alice', 'person_age': 30}
+    """
+    if not isinstance(original_dict, dict):
+        raise TypeError("The 'original_dict' argument must be a dictionary.")
+    if not isinstance(key_mapping, dict):
+        raise TypeError("The 'key_mapping' argument must be a dictionary.")
+
+    # Create a new dictionary to store the renamed keys and their values.
+    # We do this to avoid modifying the dictionary while iterating over it,
+    # which can lead to unexpected behavior or errors.
+    renamed_dict = {}
+
+    # Iterate over each key-value pair in the original dictionary.
+    # This loop has a time complexity of O(n), where n is the number of
+    # items in the original dictionary.
+    for original_key, value in original_dict.items():
+        # Check if the original key exists in our mapping.
+        # Dictionary lookups are, on average, O(1).
+        if original_key in key_mapping:
+            # If a mapping exists, use the new key from the mapping.
+            new_key = key_mapping[original_key]
+            renamed_dict[new_key] = value
+        else:
+            # If no mapping exists, keep the original key.
+            renamed_dict[original_key] = value
+
+    return renamed_dict
+
+
 def execute_os_command(command: Union[str, list[str]]) -> Tuple[int, str, str]:
     """
     Executes a command in the underlying operating system and captures its output.

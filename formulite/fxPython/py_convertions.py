@@ -1,6 +1,6 @@
 import json
 from typing import Iterable, Callable, Any, Union, List, Tuple, Set, Dict, Tuple, Union, Type, Optional
-from pydantic import BaseModel, Field, create_model
+
 
 def replace_void(primary_value: Any, replacement_value: Any = 'NaN') -> Any:
     """Replaces empty or None values with a specified replacement value.
@@ -512,7 +512,84 @@ def list_to_tuple(input_list: List[Any]) -> Tuple[Any, ...]:
 
 # --- Dictionary Conversions ---
 
-def dict_keys_to_list(data_dict: Dict[Any, Any]) -> List[Any]:
+def dictionary_to_string(input_dict: dict) -> str:
+    """Converts a dictionary into a string representation.
+
+    This function serializes a dictionary into a string where keys and values
+    are separated by colons and key-value pairs are separated by semicolons.
+    It's useful for simple persistence or transmission when more robust
+    serialization (like JSON or pickle) is overkill.
+
+    Args:
+        input_dict (dict): The dictionary to convert.
+
+    Returns:
+        str: A string representation of the input dictionary.
+
+    Raises:
+        TypeError: If the input_dict is not a dictionary.
+
+    Example of usage:
+        >>> my_dict = {"name": "Alice", "age": "30", "city": "New York"}
+        >>> dictionary_to_string(my_dict)
+        'name:Alice;age:30;city:New York'
+    Cost: O(N) where N is the total number of characters in the dictionary's keys and values.
+    """
+    if not isinstance(input_dict, dict):
+        raise TypeError("Input must be a dictionary.")
+
+    # The goal is to create a string like "key1:value1;key2:value2"
+    # Joining with ':' then with ';' is more efficient than string concatenation in a loop.
+    pairs = [f"{key}:{value}" for key, value in input_dict.items()]
+    return ";".join(pairs)
+
+
+def string_to_dictionary(input_string: str) -> dict:
+    """Converts a string representation back into a dictionary.
+
+    This function deserializes a string, previously created by `dictionary_to_string()`,
+    back into a dictionary. It's the inverse operation, useful for reconstructing
+    the original dictionary from its string form.
+
+    Args:
+        input_string (str): The string to convert.
+
+    Returns:
+        dict: A dictionary reconstructed from the input string.
+
+    Raises:
+        TypeError: If the input_string is not a string.
+        ValueError: If the input_string format is invalid (e.g., missing a colon).
+
+    Example of usage:
+        >>> my_string = 'name:Alice;age:30;city:New York'
+        >>> string_to_dictionary(my_string)
+        {'name': 'Alice', 'age': '30', 'city': 'New York'}
+    Cost: O(N) where N is the length of the input string.
+    """
+    if not isinstance(input_string, str):
+        return input_string
+
+    output_dict = {}
+
+    # If the string is empty, we should return an empty dictionary.
+    if not input_string:
+        return output_dict
+
+    # We iterate over each key-value pair separated by semicolons.
+    for pair in input_string.split(";"):
+        # Splitting by the first colon ensures that values containing colons don't break the parsing.
+        parts = pair.split(":", 1)
+        if len(parts) != 2:
+            # We raise a ValueError because an invalid format indicates an unrecoverable issue.
+            raise ValueError(f"Invalid string format: '{pair}'. Expected 'key:value'.")
+        key, value = parts
+        output_dict[key] = value
+
+    return output_dict
+
+
+def dictionary_keys_to_list(data_dict: Dict[Any, Any]) -> List[Any]:
     """Returns the keys of a dictionary as a list.
 
     Args:
@@ -522,7 +599,7 @@ def dict_keys_to_list(data_dict: Dict[Any, Any]) -> List[Any]:
         List[Any]: A list containing all keys from the dictionary.
 
     Example of use:
-        >>> dict_keys_to_list({"name": "Alice", "age": 30})
+        >>> dictionary_keys_to_list({"name": "Alice", "age": 30})
         ['name', 'age']
     """
     return list(data_dict.keys())
@@ -544,7 +621,7 @@ def dict_values_to_list(data_dict: Dict[Any, Any]) -> List[Any]:
     return list(data_dict.values())
 
 
-def dict_items_to_list_of_tuples(data_dict: Dict[Any, Any]) -> List[Tuple[Any, Any]]:
+def dictionary_items_to_list_of_tuples(data_dict: Dict[Any, Any]) -> List[Tuple[Any, Any]]:
     """Returns the key-value pairs (items) of a dictionary as a list of tuples.
 
     Args:
@@ -554,13 +631,13 @@ def dict_items_to_list_of_tuples(data_dict: Dict[Any, Any]) -> List[Tuple[Any, A
         List[Tuple[Any, Any]]: A list where each element is a `(key, value)` tuple.
 
     Example of use:
-        >>> dict_items_to_list_of_tuples({"city": "London", "population": 9000000})
+        >>> dictionary_items_to_list_of_tuples({"city": "London", "population": 9000000})
         [('city', 'London'), ('population', 9000000)]
     """
     return list(data_dict.items())
 
 
-def dict_keys_to_set(data_dict: Dict[Any, Any]) -> Set[Any]:
+def dictionary_keys_to_set(data_dict: Dict[Any, Any]) -> Set[Any]:
     """Returns the keys of a dictionary as a set.
 
     Args:
@@ -576,7 +653,7 @@ def dict_keys_to_set(data_dict: Dict[Any, Any]) -> Set[Any]:
     return set(data_dict.keys())
 
 
-def dict_values_to_set(data_dict: Dict[Any, Any]) -> Set[Any]:
+def dictionary_values_to_set(data_dict: Dict[Any, Any]) -> Set[Any]:
     """Returns the values of a dictionary as a set, which inherently removes duplicate values.
 
     Args:
@@ -586,7 +663,7 @@ def dict_values_to_set(data_dict: Dict[Any, Any]) -> Set[Any]:
         Set[Any]: A set containing all unique values from the dictionary.
 
     Example of use:
-        >>> dict_values_to_set({"a": 1, "b": 2, "c": 1})
+        >>> dictionary_values_to_set({"a": 1, "b": 2, "c": 1})
         {1, 2} # Order not guaranteed
     """
     return set(data_dict.values())
@@ -672,213 +749,75 @@ def list_of_dicts_to_merged_dict(list_of_dicts: List[Dict[Any, Any]]) -> Dict[An
     return merged_dict
 
 
-def json_schema_to_pydantic_model(
-    json_schema: Dict[str, Any], model_name: str = "DynamicModel"
-) -> Type[BaseModel]:
-    """
-    Converts a JSON schema dictionary into a Pydantic BaseModel class.
 
-    This function dynamically creates a Pydantic model based on the provided
-    JSON schema, mapping schema properties to Pydantic fields. It supports
-    basic types, nested objects, arrays, and common validation constraints.
+def string_to_list(
+    input_string: Optional[str],
+    split_by_character: Optional[str] = None
+) -> Optional[List[str]]:
+    """Converts a string into a list of substrings or individual characters.
+
+    This function offers two primary modes of operation:
+    1. If `split_by_character` is provided, the string will be split into
+       a list of substrings using that character as a delimiter.
+    2. If `split_by_character` is None (default), the string will be converted
+       into a list of its individual characters.
 
     Args:
-        json_schema (Dict[str, Any]): The JSON schema dictionary to convert.
-                                       Must contain 'type': 'object' and 'properties'.
-        model_name (str, optional): The name of the Pydantic model class to be created.
-                                    Defaults to "DynamicModel".
+        input_string: The string to be converted. Can be None.
+        split_by_character: An optional string to use as a delimiter for splitting.
+                            If None, the string is split into individual characters.
 
     Returns:
-        Type[BaseModel]: A Pydantic BaseModel class generated from the JSON schema.
+        Optional[List[str]]: A list of strings (either substrings or characters).
+                             Returns an empty list if `input_string` is an empty string.
+                             Returns None if `input_string` is None.
 
     Raises:
-        ValueError: If the 'json_schema' is not a dictionary, or if it's missing
-                    'type' or 'properties' for an object schema.
+        TypeError: If `input_string` is not a string (and not None) or if
+                   `split_by_character` is not a string (and not None).
 
-    Example usage:
-        >>> user_schema = {
-        ...     "title": "User",
-        ...     "description": "Schema for a user object",
-        ...     "type": "object",
-        ...     "properties": {
-        ...         "name": {"type": "string", "minLength": 1, "description": "User's full name"},
-        ...         "age": {"type": "integer", "minimum": 0, "maximum": 120, "description": "User's age"},
-        ...         "email": {"type": "string", "format": "email", "pattern": "^.+@.+\\..+$"},
-        ...         "is_active": {"type": "boolean", "default": True},
-        ...         "address": {
-        ...             "type": "object",
-        ...             "properties": {
-        ...                 "street": {"type": "string"},
-        ...                 "city": {"type": "string"}
-        ...             },
-        ...             "required": ["street", "city"]
-        ...         },
-        ...         "tags": {
-        ...             "type": "array",
-        ...             "items": {"type": "string"}
-        ...         },
-        ...         "hobbies": {
-        ...             "type": "array",
-        ...             "items": {
-        ...                 "type": "object",
-        ...                 "properties": {
-        ...                     "name": {"type": "string"},
-        ...                     "difficulty": {"type": "integer", "minimum": 1, "maximum": 5}
-        ...                 },
-        ...                 "required": ["name", "difficulty"]
-        ...             }
-        ...         }
-        ...     },
-        ...     "required": ["name", "email"]
-        ... }
-        >>> User = json_schema_to_pydantic_model(user_schema, "User")
-        >>> user_data = {
-        ...     "name": "Alice Smith",
-        ...     "age": 30,
-        ...     "email": "alice@example.com",
-        ...     "address": {"street": "123 Main St", "city": "Anytown"},
-        ...     "tags": ["developer", "python"],
-        ...     "hobbies": [{"name": "reading", "difficulty": 2}]
-        ... }
-        >>> user_instance = User(**user_data)
-        >>> print(user_instance.name)
-        Alice Smith
-        >>> print(user_instance.is_active)
-        True
+    Example of use:
+        >>> convert_string_to_list("hello world")
+        ['h', 'e', 'l', 'l', 'o', ' ', 'w', 'o', 'r', 'l', 'd']
 
-    Cost:
-        The cost of this function is primarily determined by the depth and number
-        of properties in the JSON schema. In the worst case, for a schema with `N`
-        properties and a maximum nesting depth of `D`, the complexity is roughly
-        O(N*D) due to recursive calls for nested objects and array items.
+        >>> convert_string_to_list("apple,banana,orange", split_by_character=",")
+        ['apple', 'banana', 'orange']
+
+        >>> convert_string_to_list("one two three", split_by_character=" ")
+        ['one', 'two', 'three']
+
+        >>> convert_string_to_list("")
+        []
+
+        >>> convert_string_to_list(None)
+        None
+
+        >>> convert_string_to_list("word")
+        ['w', 'o', 'r', 'd']
     """
-    if not isinstance(json_schema, dict):
-        raise ValueError("Input 'json_schema' must be a dictionary.")
-    if json_schema.get("type") != "object":
-        raise ValueError(
-            "The root of the JSON schema must have 'type': 'object' to be converted to a Pydantic model."
-        )
-    if "properties" not in json_schema:
-        raise ValueError(
-            "JSON schema for an object must contain a 'properties' key."
-        )
+    # Why: Handle None input immediately as there's nothing to convert.
+    if input_string is None:
+        return None
 
-    fields: Dict[str, Any] = {}
-    required_fields: List[str] = json_schema.get("required", [])
+    # Why: Ensure the main input is a string for consistent operations.
+    if not isinstance(input_string, str):
+        raise TypeError("The 'input_string' must be a string or None.")
 
-    # Iterate through each property defined in the JSON schema.
-    for prop_name, prop_schema in json_schema["properties"].items():
-        field_type: Any = Any  # Default to Any if type is not specified or recognized
-        pydantic_field_kwargs: Dict[str, Any] = {}
+    # Why: Handle the edge case of an empty string, returning an empty list.
+    if not input_string:
+        return []
 
-        # Determine the base Python type based on the JSON schema 'type'.
-        json_type = prop_schema.get("type")
+    # Why: Validate the type of the split character if it's provided.
+    if split_by_character is not None and not isinstance(split_by_character, str):
+        raise TypeError("The 'split_by_character' must be a string or None.")
 
-        if json_type == "string":
-            field_type = str
-            if "minLength" in prop_schema:
-                pydantic_field_kwargs["min_length"] = prop_schema["minLength"]
-            if "maxLength" in prop_schema:
-                pydantic_field_kwargs["max_length"] = prop_schema["maxLength"]
-            if "pattern" in prop_schema:
-                pydantic_field_kwargs["pattern"] = prop_schema["pattern"]
-            # 'format' like "email", "uri" are handled implicitly by Pydantic if type is str
-            # and may require specific Pydantic types or validators, but for
-            # basic conversion, str is sufficient.
-        elif json_type == "integer":
-            field_type = int
-            if "minimum" in prop_schema:
-                pydantic_field_kwargs["ge"] = prop_schema["minimum"]  # Greater than or equal
-            if "maximum" in prop_schema:
-                pydantic_field_kwargs["le"] = prop_schema["maximum"]  # Less than or equal
-        elif json_type == "number":
-            field_type = float  # Pydantic's 'number' maps to float
-            if "minimum" in prop_schema:
-                pydantic_field_kwargs["ge"] = prop_schema["minimum"]
-            if "maximum" in prop_schema:
-                pydantic_field_kwargs["le"] = prop_schema["maximum"]
-        elif json_type == "boolean":
-            field_type = bool
-        elif json_type == "array":
-            items_schema = prop_schema.get("items")
-            if items_schema:
-                if items_schema.get("type") == "object":
-                    # Recursively create a model for complex array items
-                    item_model_name = (
-                        f"{model_name}{prop_name.replace('_', '').title()}Item"
-                    )
-                    field_type = List[
-                        json_schema_to_pydantic_model(items_schema, item_model_name)
-                    ]
-                else:
-                    # Map primitive array item types
-                    primitive_item_type_map = {
-                        "string": str,
-                        "integer": int,
-                        "number": float,
-                        "boolean": bool,
-                    }
-                    item_type = primitive_item_type_map.get(
-                        items_schema.get("type", ""), Any
-                    )
-                    field_type = List[item_type]
-            else:
-                field_type = List[Any]  # Default to list of Any if no items schema
-        elif json_type == "object":
-            # Recursively call the function to create a nested Pydantic model
-            nested_model_name = f"{model_name}{prop_name.replace('_', '').title()}"
-            field_type = json_schema_to_pydantic_model(
-                prop_schema, nested_model_name
-            )
-        else:
-            # For unsupported or unknown types, default to Any.
-            # This allows the model to be created but provides less strict validation.
-            field_type = Any
-
-        # Add description if available
-        if "description" in prop_schema:
-            pydantic_field_kwargs["description"] = prop_schema["description"]
-
-        # Add default value if available
-        if "default" in prop_schema:
-            pydantic_field_kwargs["default"] = prop_schema["default"]
-
-        # Handle 'enum' by creating a Union of literals or simply checking against a set.
-        # Pydantic Field doesn't directly support enum validation like this without
-        # a dedicated Enum class or Literal types. For simplicity, we'll
-        # just add the enum list to the Field metadata.
-        # A more robust solution might dynamically create an Enum.
-        if "enum" in prop_schema:
-            pydantic_field_kwargs["json_schema_extra"] = {
-                "enum": prop_schema["enum"]
-            }
-
-        # Determine if the field is required or optional
-        is_required = prop_name in required_fields
-
-        if pydantic_field_kwargs:
-            # If there are any Pydantic Field arguments, use Field.
-            # We use `Optional` for non-required fields that don't have a default.
-            # If a default is provided, Pydantic handles optionality.
-            if not is_required and "default" not in pydantic_field_kwargs:
-                fields[prop_name] = (Optional[field_type], Field(None, **pydantic_field_kwargs))
-            else:
-                fields[prop_name] = (field_type, Field(**pydantic_field_kwargs))
-        else:
-            # If no special Pydantic Field arguments, simply assign the type.
-            # Handle optionality.
-            if not is_required:
-                fields[prop_name] = (Optional[field_type], None) # None for Pydantic's default optional
-            else:
-                fields[prop_name] = field_type
-
-    # Create the Pydantic model dynamically.
-    model_class = create_model(
-        model_name,
-        __base__=BaseModel,
-        __doc__=json_schema.get("description", f"Pydantic model generated from JSON schema for {model_name}."),
-        **fields,
-    )
-
-    return model_class
+    # Why: Perform the splitting based on whether a delimiter is provided.
+    if split_by_character is not None:
+        # Splits the string by the specified delimiter.
+        # Cost: O(N) where N is the length of input_string, as it iterates through the string.
+        return input_string.split(split_by_character)
+    else:
+        # Converts the string into a list of its individual characters.
+        # Cost: O(N) where N is the length of input_string, as it creates a new list.
+        return list(input_string)
 

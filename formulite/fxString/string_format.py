@@ -826,23 +826,55 @@ def normalize_symbols(text: Optional[str]) -> Optional[str]:
 
 def flat_vowels(input_string: str) -> str:
     """
-    Replaces accented characters with their base letter.
+    Removes only acute accents from vowels while preserving 'ñ', 'ç', and 'ü'.
+
+    This function iterates through the input string, applying specific rules
+    for 'ñ', 'ç', and 'ü' to ensure they remain unchanged. For other characters,
+    it normalizes them to decompose accented vowels into their base letter
+    and a diacritic, then filters out only the diacritics. The final string
+    is converted to uppercase.
 
     Args:
         input_string (str): The string to process.
 
     Returns:
-        str: The string with flattened vowels and in uppercase.
+        str: The string with only acute accents removed, with 'ñ', 'ç', and 'ü'
+             preserved, and converted to uppercase.
+
+    Raises:
+        TypeError: If the input is not a string.
 
     Example:
-        flat_vowels("Hola, cómo estás?") returns "HOLA, COMO ESTAS?"
+        >>> flat_vowels("España, cómo estás, pingüino, Cançao, Corazón")
+        'ESPAÑA, COMO ESTAS, PINGÜINO, CANÇAO, CORAZON'
+
+    Cost:
+        The cost of this function is **O(n)**, where 'n' is the length of the
+        input string. This is because it processes each character individually.
     """
     if not isinstance(input_string, str):
-        return False
+        # Raising a TypeError clearly indicates that the function received an
+        # unsupported input type, which is a common best practice for robust functions.
+        raise TypeError("Input must be a string.")
 
-    nfkd_form = unicodedata.normalize('NFKD', input_string)
-    only_ascii = nfkd_form.encode('ASCII', 'ignore').decode('utf-8')
-    return only_ascii
+    result_chars = []
+    for char in input_string:
+        # Check if the character is one of the special Spanish characters (Ñ, Ç, Ü)
+        # or their lowercase equivalents. If so, preserve them as is.
+        if char.lower() in ('ñ', 'ç', 'ü'):
+            result_chars.append(char)
+        else:
+            # For all other characters, normalize them to their decomposed form (NFKD).
+            # This separates base letters from their diacritics (like acute accents).
+            normalized_char = unicodedata.normalize('NFKD', char)
+            # Filter out only the combining characters (diacritics/accents)
+            # and append the base character to the result.
+            # This effectively removes acute accents from vowels (á -> a, é -> e, etc.).
+            flattened_char = ''.join([c for c in normalized_char if not unicodedata.combining(c)])
+            result_chars.append(flattened_char)
+
+    # Finally, convert the entire resulting string to uppercase.
+    return normalize_spaces("".join(result_chars).upper())
 
 
 def ascii_string(input_string: str | None) -> str | None:
