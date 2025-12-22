@@ -1,3 +1,5 @@
+
+
 from datetime import date, time, datetime, timedelta
 from typing import Union,Literal,List, Tuple, Optional, Set, Dict, Any
 import calendar
@@ -5,7 +7,29 @@ import locale
 import random
 import zoneinfo # Requires Python 3.9+ for ZoneInfo
 
-from ..fxString.string_convertions import string_to_date, string_to_datetime
+
+#my modules
+import os
+import sys
+def add_to_syspath(directory):
+    def search(start):
+        root = os.path.abspath(os.sep)
+        while True:
+            path = os.path.join(start, directory)
+            if os.path.isdir(path):
+                sys.path.insert(0, path) if path not in sys.path else None
+                print(f"Se encontró y agregó a sys.path: {path}")
+                return True
+            if start.lower() == root.lower(): return False
+            start = os.path.dirname(start)
+    if search(os.path.abspath(os.getcwd())): return
+    try:
+        if search(os.path.dirname(os.path.abspath(__file__))): return
+    except NameError: print("No se pudo obtener el directorio del módulo.")
+    raise FileNotFoundError(f"No se encontró {directory}")
+add_to_syspath("fxString")
+from string_convertions import string_to_date, string_to_datetime
+
 
 def is_date_type(value: Any) -> bool:
     """Verifica si un objeto es de tipo fecha (date, datetime o time).
@@ -781,7 +805,7 @@ def get_nth_weekday_of_month(year: int, month: int, weekday: int, n: int) -> Opt
 def add_days_from_now(days: int) -> datetime:
     """Adds or subtracts a specified number of days from the current date and time.
 
-    This function is a convenience wrapper around `add_days_to_date`, providing
+    This function is a convenience wrapper around `add_days_from_now`, providing
     a straightforward way to get a date offset from the present moment. It's
     useful for scenarios where calculations always begin relative to "today"
     or "now", such as setting deadlines, future reminders, or looking at past events.
@@ -795,7 +819,7 @@ def add_days_from_now(days: int) -> datetime:
 
     Raises:
         TypeError: If 'days' is not an integer. (This check is implicitly handled
-                   by the call to `add_days_to_date` which has its own type check).
+                   by the call to `add_days_from_now` which has its own type check).
 
     Example:
         >>> from datetime import datetime
@@ -815,7 +839,7 @@ def add_days_from_now(days: int) -> datetime:
     # Get the current datetime. This is the starting point for the calculation.
     current_datetime = datetime.now()
 
-    # Reuse the existing add_days_to_date function to perform the actual
+    # Reuse the existing add_days_from_now function to perform the actual
     # addition/subtraction, promoting code reusability and reducing duplication.
     return add_time_to_date(current_datetime, days, 'days')
 

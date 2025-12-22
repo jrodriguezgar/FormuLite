@@ -2,6 +2,7 @@ from datetime import date, datetime, timezone, timedelta
 from typing import Union, Optional, Tuple, List
 import zoneinfo
 
+    
 def datetime_to_date(datetime_obj: datetime) -> date:
     """Converts a datetime object to a date object, discarding the time components.
 

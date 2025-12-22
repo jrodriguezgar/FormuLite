@@ -1,10 +1,18 @@
 import collections
-from typing import Optional, Dict, List
+from typing import Optional, Dict, List, Iterable
 import re
 import unicodedata
 import difflib
 import random
 import string
+
+
+# Pre-compiled regex patterns for optimization
+_RE_WHITESPACE = re.compile(r'\s+')
+_RE_WORD_BOUNDARY = re.compile(r'\b\w+\b')
+_RE_NUMBER_PATTERN = re.compile(r'[-+]?\d*\.\d+|[-+]?\d+')
+_RE_DIGITS = re.compile(r'\d')
+_RE_NON_ALPHANUMERIC = re.compile(r'[^a-zA-Z0-9\s]')
 
 
 DELIMITERS = {
@@ -17,6 +25,10 @@ DELIMITERS = {
     "''": (r"'", r"'"),  # Single quotes (e.g., 'text')
     '$$': (r'\$\$', r'\$\$')  # Double dollar signs (e.g., $$math$$ in LaTeX)
 }
+
+
+# Default punctuation and separator pattern for word splitting, reusable in other functions
+_DEFAULT_WORD_SEPARATORS = rf"[{re.escape(string.punctuation)}§¿¡«»‹›‘’“”„†‡°€¥£¢₽₹〒〶〴〵—–—~`\s]+"
 
 
 def ascii_from_char(character: str) -> int:
@@ -899,8 +911,8 @@ def common_substring(string1: str, string2: str, min_longest_substring: int = 4)
 
     # Calculate the minimum word length from both strings.
     # We use regex to split by non-alphanumeric characters to get distinct words.
-    words1 = re.findall(r'\b\w+\b', string1)
-    words2 = re.findall(r'\b\w+\b', string2)
+    words1 = _RE_WORD_BOUNDARY.findall(string1)
+    words2 = _RE_WORD_BOUNDARY.findall(string2)
 
     all_words = words1 + words2
     min_word_length = 0
@@ -1624,7 +1636,7 @@ def extract_last_number(input_string: str | None) -> int | float | None:
     # `[-+]?\d+` matches an integer number (e.g., "5", "-10", "+20").
     # We use `re.findall` to get all matches, then take the last one.
     # The order `\d*\.\d+|\d+` is important to prioritize floats over integers.
-    all_matches = re.findall(r'[-+]?\d*\.\d+|[-+]?\d+', input_string)
+    all_matches = _RE_NUMBER_PATTERN.findall(input_string)
 
     # If matches were found, process the last one.
     if all_matches:
@@ -1645,7 +1657,71 @@ def extract_last_number(input_string: str | None) -> int | float | None:
     return None
 
 
-def split_all(text_to_tokenize: str, delimiter_pattern: str = None) -> list[str]:
+def extract_numbers(input_string: str | None) -> list[int | float]:
+    """Extracts all integers and floats (positive or negative) from a string.
+
+    This function searches for all occurrences of numbers within the
+    given string. It handles both integer and decimal numbers, as well as
+    positive and negative signs. Returns a list of all numbers found,
+    where each number is returned as an int or float depending on whether
+    it contains a decimal point.
+
+    Args:
+        input_string: The string from which to extract the numbers.
+
+    Returns:
+        A list of extracted numbers as `int` or `float` values.
+        Returns an empty list if no numbers are found or the input is invalid.
+
+    Raises:
+        None
+
+    Example of use:
+        >>> extract_numbers("The prices are 42 and 19.99")
+        [42, 19.99]
+        >>> extract_numbers("Values: -5, 10.5, +100")
+        [-5, 10.5, 100]
+        >>> extract_numbers("No numbers here!")
+        []
+        >>> extract_numbers("Mixed: 1.5, 2, -3.14, 42")
+        [1.5, 2, -3.14, 42]
+        >>> extract_numbers(None)
+        []
+
+    Cost:
+        O(n) where n is the length of the input string. This is due to
+        the regular expression search operation.
+    """
+    # Defensive programming: Ensure the input is a non-empty string.
+    if not isinstance(input_string, str) or not input_string:
+        return []
+
+    # Regex to find numbers:
+    # `[-+]?` matches an optional sign (+ or -).
+    # `\d*\.\d+` matches a floating-point number (e.g., ".5", "1.5", "-.5").
+    # `|` acts as an OR operator.
+    # `[-+]?\d+` matches an integer number (e.g., "5", "-10", "+20").
+    # We use `re.findall` to get all matches.
+    # The order `\d*\.\d+|\d+` is important to prioritize floats over integers.
+    all_matches = _RE_NUMBER_PATTERN.findall(input_string)
+
+    # Convert matched strings to appropriate numeric types
+    result = []
+    for match in all_matches:
+        try:
+            # Check for the presence of a decimal point to determine the type.
+            if '.' in match:
+                result.append(float(match))
+            else:
+                result.append(int(match))
+        except ValueError:
+            # Skip any matches that cannot be converted (though regex should prevent this)
+            continue
+
+    return result
+
+
+def split_all(text_to_tokenize: str, delimiter_pattern: str = None, return_joined: bool = False) -> list[str] | tuple[list[str], str]:
     """
     Splits the input string into a list of words (tokens) based on a
     comprehensive set of delimiters.
@@ -1665,11 +1741,16 @@ def split_all(text_to_tokenize: str, delimiter_pattern: str = None) -> list[str]
                                            including punctuation, symbols, and
                                            whitespace will be used.
                                            Defaults to None.
+        return_joined (bool, optional): If True, returns a tuple containing
+                                         the split list and the joined string
+                                         using join_to_string with default separator.
+                                         Defaults to False.
 
     Returns:
-        list[str]: A list of strings, where each string is a token (word).
+        list[str] | tuple[list[str], str]: A list of strings, where each string is a token (word).
                    Returns an empty list if the input is None or an empty string
-                   after processing.
+                   after processing. If return_joined is True, returns a tuple
+                   (split_list, joined_string).
 
     Raises:
         TypeError: If 'text_to_tokenize' is not a string or None, or if
@@ -1686,6 +1767,8 @@ def split_all(text_to_tokenize: str, delimiter_pattern: str = None) -> list[str]
         ['Python', 's', 'cool']
         >>> split_all(None)
         []
+        >>> split_all("Hello world", return_joined=True)
+        (['Hello', 'world'], 'Hello world')
 
     Cost:
         O(N), where N is the length of the input string. This is due to
@@ -1693,21 +1776,13 @@ def split_all(text_to_tokenize: str, delimiter_pattern: str = None) -> list[str]
         respect to the input size.
     """
     if text_to_tokenize is None:
+        if return_joined:
+            return ([], "")
         return []
 
-    # If no custom pattern is provided, construct a default comprehensive one.
-    # This pattern includes all characters from string.punctuation, common symbols,
-    # and all whitespace characters.
+    # If no custom pattern is provided, use the default comprehensive one.
     if delimiter_pattern is None:
-        # re.escape() is used to escape special characters in string.punctuation
-        # so they are treated as literal characters in the regex.
-        # \s+ matches one or more whitespace characters.
-        # We explicitly include common symbols that might not be in string.punctuation
-        # but are often treated as delimiters in text processing.
-        # The '+' at the end ensures that multiple consecutive delimiters are
-        # treated as a single delimiter.
-        default_pattern = rf"[{re.escape(string.punctuation)}§¿¡«»‹›‘’“”„†‡°€¥£¢₽₹〒〶〴〵—–—~`\s]+"
-        pattern_to_use = default_pattern
+        pattern_to_use = _DEFAULT_WORD_SEPARATORS
     else:
         pattern_to_use = delimiter_pattern
 
@@ -1719,7 +1794,13 @@ def split_all(text_to_tokenize: str, delimiter_pattern: str = None) -> list[str]
     # Filter out any empty strings and return the cleaned list of tokens.
     # filter(None, ...) is an efficient way to remove falsy values (like empty strings)
     # from an iterable.
-    return list(filter(None, split_parts))
+    split_list = list(filter(None, split_parts))
+
+    if return_joined:
+        joined_string = join_to_string(split_list)
+        return (split_list, joined_string)
+
+    return split_list
 
 
 def split_by_substrings(p_iparse: str, p_separators: list[str]) -> list[str]:
@@ -1780,7 +1861,29 @@ def split_limited(p_iparse, p_limit):
         return oparse[:p_limit] + [" ".join(oparse[p_limit:])]
 
 
-def find_substring(string1: str, string2: str) -> list[dict]:
+def join_to_string(iterable: Iterable[str], separator: str = " ") -> str:
+    """
+    Joins an iterable of strings into a single string with a specified separator.
+
+    Args:
+        iterable (Iterable[str]): The iterable of strings to join.
+        separator (str, optional): The separator to use between strings.
+                                   Defaults to a single space.
+
+    Returns:
+        str: The joined string.
+
+    Example of use:
+        >>> join_to_string(['Hello', 'world!'])
+        'Hello world!'
+        >>> join_to_string(['apple', 'banana', 'cherry'], separator=', ')
+        'apple, banana, cherry'
+        >>> join_to_string(('a', 'b', 'c'))
+        'a b c'
+    """
+    return separator.join(iterable)
+
+def get_substrings(string1: str, string2: str) -> list[dict]:
     """
     Identifies and returns all common contiguous substrings (matching blocks)
     between two input strings.
@@ -1808,17 +1911,17 @@ def find_substring(string1: str, string2: str) -> list[dict]:
         TypeError: If 'string1' or 'string2' are not strings.
 
     Example:
-        >>> find_substring("apple tree", "pineapple")
+        >>> get_substrings("apple tree", "pineapple")
         [{'string1_start': 0, 'string2_start': 1, 'length': 5, 'substring': 'apple'}]
 
-        >>> find_substring("banana peel", "bandana")
+        >>> get_substrings("banana peel", "bandana")
         [{'string1_start': 0, 'string2_start': 0, 'length': 3, 'substring': 'ban'},
          {'string1_start': 5, 'string2_start': 4, 'length': 2, 'substring': 'na'}]
 
-        >>> find_substring("hello world", "python")
+        >>> get_substrings("hello world", "python")
         []
 
-        >>> find_substring("abc", "abc")
+        >>> get_substrings("abc", "abc")
         [{'string1_start': 0, 'string2_start': 0, 'length': 3, 'substring': 'abc'}]
     """
     if not isinstance(string1, str):
@@ -1856,7 +1959,7 @@ def find_substring(string1: str, string2: str) -> list[dict]:
     return common_substring_blocks
 
 
-def find_patterns_in_text(text: str, pattern_type: str) -> list:
+def get_in_text_by_pattern(text: str, pattern_type: str) -> list:
     """
     Finds and returns all occurrences of a specified pattern type within the given text.
 
@@ -1909,7 +2012,7 @@ def find_patterns_in_text(text: str, pattern_type: str) -> list:
 
     Example of use:
         sample_text = "Hello 123 World! This is a test. My email is test@example.com."
-        alphanumeric_matches = find_patterns_in_text(sample_text, 'alphanumeric_strings')
+        alphanumeric_matches = get_in_text_by_pattern(sample_text, 'alphanumeric_strings')
         print(f"Alphanumeric matches: {alphanumeric_matches}") # Expected: ['Hello 123', 'World']
 
     Cost:
@@ -1994,6 +2097,7 @@ def find_patterns_in_text(text: str, pattern_type: str) -> list:
 def erase_specialchar(text: str, allow_spaces: bool = True, allow_underscores: bool = False, additional_allowed_chars: str = '') -> str:
     """
     Limpia una cadena de texto eliminando caracteres especiales.
+    Optimizada con patrones pre-compilados y técnicas de procesamiento eficientes.
 
     La función convierte la cadena a mayúsculas, normaliza los acentos,
     y luego elimina todos los caracteres que no sean alfanuméricos,
@@ -2009,44 +2113,37 @@ def erase_specialchar(text: str, allow_spaces: bool = True, allow_underscores: b
 
     Returns:
         str: La cadena de texto limpia.
+    
+    Cost:
+        O(n) where n is the length of the text. Optimized with list comprehension
+        for accent removal and pre-compiled regex for whitespace normalization.
     """
     if not isinstance(text, str):
-        # Si la entrada no es una cadena, la convertimos a cadena para evitar errores,
-        # aunque un caso más estricto podría levantar un TypeError o devolver una cadena vacía.
         text = str(text)
 
-    # 1. Normalizar a mayúsculas y quitar acentos (aplanar vocales)
-    # Convertir a formato de normalización de compatibilidad de descomposición (NFKD)
-    # y luego eliminar los caracteres combinados (diacríticos).
+    # 1. Normalizar a mayúsculas y quitar acentos (aplanar vocales) en un solo paso
+    # Usar list comprehension es más eficiente que join con generador
     normalized_text = unicodedata.normalize('NFKD', text.upper())
-    cleaned_text = "".join([c for c in normalized_text if not unicodedata.combining(c)])
+    cleaned_text = ''.join(c for c in normalized_text if not unicodedata.combining(c))
 
-    # 2. Construir el patrón de caracteres permitidos
-    # Empezamos con alfanuméricos (A-Z, 0-9)
-    allowed_pattern_parts = [r'A-Z0-9']
-
+    # 2. Construir el patrón de caracteres permitidos de forma optimizada
+    allowed_chars = ['A-Z0-9']
+    
     if allow_spaces:
-        allowed_pattern_parts.append(r'\s') # \s incluye espacios, tabulaciones, saltos de línea
+        allowed_chars.append(r'\s')
     if allow_underscores:
-        allowed_pattern_parts.append(r'_')
-
-    # Añadir caracteres adicionales permitidos, escapándolos para regex
+        allowed_chars.append('_')
     if additional_allowed_chars:
-        # re.escape() asegura que caracteres como '.', '-', '[' se traten literalmente
-        escaped_additional_chars = re.escape(additional_allowed_chars)
-        allowed_pattern_parts.append(escaped_additional_chars)
+        allowed_chars.append(re.escape(additional_allowed_chars))
 
-    # Unir las partes para formar el conjunto de caracteres permitidos dentro de []
-    # y usar un patrón de negación [^...] para encontrar lo que NO está permitido.
-    final_pattern = r'[^' + ''.join(allowed_pattern_parts) + r']'
+    # Crear y compilar el patrón una sola vez
+    pattern = re.compile(r'[^' + ''.join(allowed_chars) + r']')
 
-    # 3. Eliminar caracteres que no están en el patrón permitido
-    cleaned_text = re.sub(final_pattern, '', cleaned_text)
+    # 3. Eliminar caracteres no permitidos
+    cleaned_text = pattern.sub('', cleaned_text)
 
-    # 4. Normalizar espacios múltiples a un solo espacio y quitar espacios de los extremos
-    cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip()
-
-    return cleaned_text
+    # 4. Normalizar espacios usando patrón pre-compilado
+    return _RE_WHITESPACE.sub(' ', cleaned_text).strip()
 
 '''# Ejemplo 1: Básico, solo letras y números, sin acentos
 texto1 = "¡Hola, mundo! Esto es una prueba con números 123 y símbolos: @#$€."
@@ -2220,84 +2317,6 @@ def erase_between_delimiters(
     return re.sub(full_regex_pattern, '', text, flags=re.DOTALL)
 
 
-def add_quotes(text: Optional[str], quote_type: str = "'") -> Optional[str]:
-    """
-    Adds single or double quotes to the beginning and end of a string.
-
-    Args:
-        text (Optional[str]): The string to be quoted. Can be None.
-        quote_type (str): The type of quote to use, either "'" (single) or '"' (double).
-                          Defaults to a single quote.
-
-    Returns:
-        Optional[str]: The quoted string, or None if the input 'text' was None.
-
-    Example:
-        add_quotes("hello")      # Returns "'hello'"
-        add_quotes("world", '"') # Returns '"world"'
-    """
-    if text is None:
-        return None
-
-    # Ensure quote_type is valid; default to single quote if not.
-    if quote_type not in ("'", '"'):
-        quote_type = "'"
-        
-    return f"{quote_type}{text}{quote_type}"
-
-    
-def detect_quotes(text: Optional[str]) -> bool:
-    """
-    Detects if a string is enclosed in either single or double quotes.
-
-    Args:
-        text (Optional[str]): The string to analyze. Can be None.
-
-    Returns:
-        bool: True if the string is quoted, False otherwise.
-
-    Example:
-        detect_quotes("'example'") # Returns True
-        detect_quotes('"example"') # Returns True
-        detect_quotes("example")   # Returns False
-    """
-    # If the text is None, not a string, or too short to be quoted, it's not quoted.
-    if not isinstance(text, str) or len(text) < 2:
-        return False
-    
-    first_char = text[0]
-    last_char = text[-1]
-
-    # Check if the first and last characters are the same and are a valid quote type.
-    return (first_char == last_char) and (first_char in ("'", '"'))
-
-
-def remove_quotes(text: Optional[str]) -> Optional[str]:
-    """
-    Removes leading and trailing single or double quotes from a string if they exist.
-
-    Args:
-        text (Optional[str]): The input string. Can be None.
-
-    Returns:
-        Optional[str]: The string with initial/final quotes removed, or None if the input 'text' was None.
-                       Returns the original string if it's not quoted.
-
-    Example:
-        remove_quotes("'example'") # Returns "example"
-        remove_quotes('"test"')    # Returns "test"
-        remove_quotes('unquoted')  # Returns "unquoted"
-    """
-    if text is None:
-        return None
-        
-    # Only remove quotes if the string is actually detected as quoted.
-    if detect_quotes(text):
-        return text[1:-1]
-        
-    return text
-
-
 def distinct_words(input_string: str, case_sensitive: bool = False) -> list[str]:
     """
     Extracts all unique words from a string, with an option for case sensitivity.
@@ -2346,7 +2365,7 @@ def distinct_words(input_string: str, case_sensitive: bool = False) -> list[str]
 
     # Use a regular expression to find all sequences of word characters (alphanumeric + underscore).
     # This effectively splits the string by non-word characters and handles punctuation.
-    words = re.findall(r'\b\w+\b', input_string)
+    words = _RE_WORD_BOUNDARY.findall(input_string)
 
     # Use a set to store unique words for efficient lookup and to handle distinctness.
     distinct_words_set = set()
@@ -2364,6 +2383,79 @@ def distinct_words(input_string: str, case_sensitive: bool = False) -> list[str]
             result_list.append(word if case_sensitive else processed_word)
 
     return result_list
+
+
+def move_word(input_string: str, from_index: int, to_index: int) -> str:
+    """
+    Moves a word from one position to another within a string.
+
+    This function splits the input string into words, removes the word at the specified
+    'from_index', and inserts it at the 'to_index'. The resulting words are then joined
+    back into a single string with spaces. If 'from_index' equals 'to_index', the original
+    string is returned unchanged.
+
+    Args:
+        input_string (str): The string containing the words to manipulate.
+        from_index (int): The 0-based index of the word to move. Must be non-negative
+                          and within the range of available words.
+        to_index (int): The 0-based index where to insert the moved word. If 'to_index'
+                        is greater than the number of words after removal, the word is
+                        appended at the end.
+
+    Returns:
+        str: The modified string with the word moved to the new position.
+
+    Raises:
+        TypeError: If 'input_string' is not a string, or if 'from_index' or 'to_index'
+                   are not integers.
+        ValueError: If 'from_index' is negative, or if 'from_index' is out of range
+                    for the available words.
+
+    Example Usage:
+        >>> move_word("hello world this is a test", 0, 4)
+        'world this is a hello test'
+        >>> move_word("apple banana cherry", 1, 0)
+        'banana apple cherry'
+        >>> move_word("one two three", 2, 2)
+        'one two three'
+
+    Cost:
+        O(n), where n is the length of the input string. This is due to string splitting
+        and joining operations, which are linear in the string length.
+    """
+    if not isinstance(input_string, str):
+        raise TypeError("Input 'input_string' must be a string.")
+    if not isinstance(from_index, int):
+        raise TypeError("Input 'from_index' must be an integer.")
+    if not isinstance(to_index, int):
+        raise TypeError("Input 'to_index' must be an integer.")
+    if from_index < 0:
+        raise ValueError("Input 'from_index' must be non-negative.")
+    if to_index < 0:
+        raise ValueError("Input 'to_index' must be non-negative.")
+
+    # Split the string into words
+    words = input_string.split()
+
+    # Check if from_index is within range
+    if from_index >= len(words):
+        raise ValueError(f"Input 'from_index' {from_index} is out of range for {len(words)} words.")
+
+    # If from_index equals to_index, no change needed
+    if from_index == to_index:
+        return input_string
+
+    # Remove the word at from_index
+    word_to_move = words.pop(from_index)
+
+    # Insert the word at to_index, handling if to_index is beyond the current length
+    if to_index >= len(words):
+        words.append(word_to_move)
+    else:
+        words.insert(to_index, word_to_move)
+
+    # Join the words back into a string
+    return ' '.join(words)
 
 
 def rotate_words(
@@ -2410,23 +2502,108 @@ def rotate_words(
     # The effective number of rotations is the remainder after dividing by the number of words.
     effective_rotations = num_rotations % len(words)
 
-    # If no effective rotates, return the original string
-    if effective_rotates == 0:
+    # If no effective rotations, return the original string
+    if effective_rotations == 0:
         return text
 
-    # 4. Use collections.deque for efficient rotations
-    # deque allows O(1) appending/popping from both ends.
-    word_deque = collections.deque(words)
-
-    if rotate_direction == 'right':
-        # Move elements from the end to the beginning (right rotation)
-        # deque.rotate(n) moves n elements from the right end to the left end
-        word_deque.rotate(effective_rotations)
-    elif rotate_direction == 'left':
-        # Move elements from the beginning to the end (left rotation)
-        # deque.rotate(-n) moves n elements from the left end to the right end
-        word_deque.rotate(-effective_rotations)
+    # 4. Perform rotations using move_word
+    for _ in range(effective_rotations):
+        if rotate_direction == 'left':
+            # Move the first word to the end
+            words = text.split()
+            text = move_word(text, 0, len(words) - 1)
+        elif rotate_direction == 'right':
+            # Move the last word to the beginning
+            words = text.split()
+            text = move_word(text, len(words) - 1, 0)
     
-    # 5. Join the words back into a string
-    return ' '.join(word_deque)
+    # 5. Return the rotated string
+    return text
+
+
+def concatenate_strings(string1: str, string2: str) -> str:
+    """
+    Concatenates two strings into a single string.
+
+    This function combines two string inputs using the `+` operator. While
+    `str.join()` is more efficient for a list of many strings, the `+`
+    operator is perfectly clear and performant for just two strings.
+
+    Args:
+        string1 (str): The first string.
+        string2 (str): The second string.
+
+    Returns:
+        str: The single concatenated string.
+
+    Raises:
+        TypeError: If either input is not a string.
+
+    Example of use:
+        >>> first_name = "John"
+        >>> last_name = "Doe"
+        >>> full_name = concatenate_two_strings(first_name, last_name)
+        'JohnDoe'
+
+    Cost:
+        The time complexity is O(N + M), where N and M are the lengths of
+        the two input strings. The space complexity is O(N + M) to store
+        the new resulting string.
+    """
+    return string1 + string2
+
+
+
+def add_quotes(text: Optional[str], quote_type: str = "'") -> Optional[str]:
+    """
+    Adds single or double quotes to the beginning and end of a string.
+
+    This function wraps the input string with the specified quote character.
+    It performs input validation and defaults to single quotes if an invalid
+    quote type is provided.
+
+    Args:
+        text (Optional[str]): The string to be quoted. Can be None.
+        quote_type (str): The type of quote to use. Must be either "'" (single)
+                         or '"' (double). Defaults to single quote.
+
+    Returns:
+        Optional[str]: The quoted string, or None if the input was None.
+                       Non-string inputs are converted to strings before quoting.
+
+    Raises:
+        None
+
+    Example of use:
+        >>> add_quotes("hello world")
+        "'hello world'"
+        >>> add_quotes("Python is great", '"')
+        '"Python is great"'
+        >>> add_quotes("text with 'quotes'", '"')
+        '"text with \'quotes\'"'
+        >>> add_quotes(None)
+        None
+        >>> add_quotes(123)
+        "'123'"
+
+    Cost:
+        O(n) where n is the length of the input string.
+    """
+    # Define valid quote characters as a constant for clarity and maintainability
+    VALID_QUOTES = ("'", '"')
+
+    # Handle None input
+    if text is None:
+        return None
+
+    # Ensure text is a string (convert if necessary)
+    if not isinstance(text, str):
+        text = str(text)
+
+    # Validate quote_type and default to single quote if invalid
+    if quote_type not in VALID_QUOTES:
+        quote_type = "'"
+
+    # Add quotes using f-string for clarity and efficiency
+    return f"{quote_type}{text}{quote_type}"
 

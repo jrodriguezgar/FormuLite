@@ -1,9 +1,10 @@
 import unicodedata
 import re
 from typing import Optional
+from datetime import datetime as dt, date
 
-from formulite.fxString import string_format as fxStrFmt
-from formulite.fxString import string_operations as fxStrOps
+import formulite.fxString.string_format as fxStrFmt
+import formulite.fxString.string_operations as fxStrOps
 
 # --- Constants for NIF/VAT Validation ---
 # Pre-compiled regex patterns for efficiency
@@ -412,9 +413,9 @@ def has_date_format(value: str) -> bool:
     # Iterate through the list of formats and try to parse the value
     for fmt in format_list:
         try:
-            # Use datetime.strptime to attempt parsing.
+            # Use dt.strptime to attempt parsing.
             # If successful, it means the string matches the format.
-            datetime.strptime(value, fmt)
+            dt.strptime(value, fmt)
             return True
         except ValueError:
             # If parsing fails, try the next format
@@ -644,6 +645,10 @@ def validate_substring_type(
         ValueError: Si extract_method es inválido o faltan parámetros para la extracción.
         TypeError: Si los tipos de entrada no son correctos.
     """
+    
+    # If the input is None, do not execute the function
+    if original_string is None:
+        return False, "", "El argumento 'original_string' es None."
 
     # 1. Validar parámetros de entrada generales
     if not isinstance(original_string, str):
@@ -659,15 +664,15 @@ def validate_substring_type(
         if extract_method == 'substring':
             if start_position is None or length is None:
                 raise ValueError("Para 'substring', 'start_position' y 'length' son obligatorios.")
-            sub = fxStrOpssubstring(original_string, start_position, length)
+            sub = fxStrOps.substring(original_string, start_position, length)
         elif extract_method == 'left':
             if num_chars is None:
                 raise ValueError("Para 'left', 'num_chars' es obligatorio.")
-            sub = fxStrOpsleft_substring(original_string, num_chars)
+            sub = fxStrOps.left_substring(original_string, num_chars)
         elif extract_method == 'right':
             if num_chars is None:
                 raise ValueError("Para 'right', 'num_chars' es obligatorio.")
-            sub = fxStrOpsright_substring(original_string, num_chars)
+            sub = fxStrOps.right_substring(original_string, num_chars)
         else:
             raise ValueError(f"Método de extracción '{extract_method}' no reconocido. Use 'substring', 'left' o 'right'.")
     except TypeError as e:
@@ -704,7 +709,7 @@ def validate_substring_type(
     elif expected_type == 'date':
         if date_format:
             try:
-                datetime.strptime(sub, date_format)
+                dt.strptime(sub, date_format)
                 is_valid = True
                 message = f"Subcadena '{sub}' es una fecha válida con formato '{date_format}'."
             except ValueError:
@@ -1235,3 +1240,152 @@ def validate_nif_format_and_type(raw_nif_string: str, assume_spanish_if_no_prefi
         return False, None, None, None, None
     
     return False, None, None, None, None # Fallback for unmatched cases
+
+
+
+def detect_quotes(text: Optional[str]) -> bool:
+    """
+    Detects if a string is enclosed in either single or double quotes.
+
+    This function checks whether the input string starts and ends with the same
+    quote character (either single quote ' or double quote "). It performs
+    input validation to handle edge cases gracefully.
+
+    Args:
+        text (Optional[str]): The string to analyze. Can be None.
+
+    Returns:
+        bool: True if the string is quoted with matching single or double quotes,
+              False otherwise (including None input, non-string input, or strings
+              that are too short to be quoted).
+
+    Raises:
+        None
+
+    Example of use:
+        >>> detect_quotes("'hello world'")
+        True
+        >>> detect_quotes('"Python is great"')
+        True
+        >>> detect_quotes("unquoted text")
+        False
+        >>> detect_quotes("'mismatched\"")
+        False
+        >>> detect_quotes("")
+        False
+        >>> detect_quotes(None)
+        False
+        >>> detect_quotes("'")
+        False
+
+    Cost:
+        O(1) - Constant time operation regardless of string length.
+    """
+    # Define valid quote characters as a constant for clarity and maintainability
+    VALID_QUOTES = ("'", '"')
+
+    # Input validation: handle None, non-string types, and strings too short to be quoted
+    if text is None or not isinstance(text, str) or len(text) < 2:
+        return False
+
+    # Check if first and last characters are the same and are valid quotes
+    first_char = text[0]
+    last_char = text[-1]
+
+    return first_char == last_char and first_char in VALID_QUOTES
+
+
+def count_words(input_string: str) -> int:
+    """
+    Counts the number of words in a given string.
+
+    This function splits the string by whitespace characters and returns
+    the total number of resulting words. It handles multiple spaces
+    between words and leading/trailing spaces correctly, as `str.split()`
+    by default splits by any whitespace and discards empty strings.
+
+    Args:
+        input_string (str): The string whose words are to be counted.
+
+    Returns:
+        int: The total number of words in the string.
+
+    Raises:
+        TypeError: If 'input_string' is not a string.
+
+    Example:
+        >>> count_words("Hello world")
+        2
+
+        >>> count_words("  Leading and trailing spaces ")
+        4
+
+        >>> count_words("SingleWord")
+        1
+
+        >>> count_words("")
+        0
+
+        >>> count_words("  ") # Only spaces
+        0
+    """
+    if not isinstance(input_string, str):
+        raise TypeError("Input 'input_string' must be a string.")
+
+    # Split the string by any whitespace.
+    # By default, str.split() without arguments handles multiple spaces
+    # and leading/trailing spaces by discarding empty strings,
+    # ensuring accurate word counting.
+    words = input_string.split()
+
+    # The number of words is simply the length of the resulting list.
+    return len(words)
+
+
+def count_characters(input_string: str, target_char: str) -> int:
+    """
+    Counts the occurrences of a specific character within a string.
+
+    This function leverages the built-in `str.count()` method to efficiently
+    determine how many times a given character appears in the input string.
+    The comparison is case-sensitive.
+
+    Args:
+        input_string (str): The string to search within.
+        target_char (str): The single character to count.
+
+    Returns:
+        int: The number of times 'target_char' appears in 'input_string'.
+
+    Raises:
+        TypeError: If 'input_string' is not a string or 'target_char' is not a string.
+        ValueError: If 'target_char' is an empty string or contains more than one character.
+
+    Example:
+        >>> count_characters("hello world", "o")
+        2
+
+        >>> count_characters("programming", "g")
+        2
+
+        >>> count_characters("Banana", "a")
+        3
+
+        >>> count_characters("Banana", "A") # Case-sensitive
+        0
+
+        >>> count_characters("test", "x")
+        0
+    """
+    if not isinstance(input_string, str):
+        raise TypeError("Input 'input_string' must be a string.")
+    if not isinstance(target_char, str):
+        raise TypeError("Input 'target_char' must be a string.")
+    if not target_char:
+        raise ValueError("Input 'target_char' cannot be an empty string.")
+    if len(target_char) != 1:
+        raise ValueError("Input 'target_char' must be a single character.")
+
+    # Use the built-in str.count() method for efficient character counting.
+    # This method is optimized in C and is generally the fastest way to count occurrences.
+    return input_string.count(target_char)

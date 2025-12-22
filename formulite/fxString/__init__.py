@@ -1,2 +1,4 @@
-__version__ = "0.0.1"
-__author__ = "DatamanEdge"
+"""
+fxString - String manipulation and formatting utilities
+"""
+from ..fxPython import *

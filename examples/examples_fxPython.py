@@ -47,4 +47,24 @@ print('pydantic model:')
 print(capital_instance)
 
 
+# --- Examples ---
+print("### Ejemplos de Uso ###")
 
+# Example 1: Simple order of operations
+expression1 = "3 + 4 * 5"
+resultado1 = calculate(expression1)
+print(f"El resultado de '{expression1}' es: {resultado1}")
+
+# Example 2: With parentheses and implicit multiplication
+expression2 = "2 * 3(6 / 2) - 9 + 6"
+resultado2 = calculate(expression2)
+print(f"El resultado de '{expression2}' es: {resultado2}")
+
+# Example 3: Invalid expression
+try:
+    expression3 = "5 * (3 + 2" # Missing closing parenthesis
+    calculate(expression3)
+except ValueError as e:
+    print(f"Error al evaluar '{expression3}': {e}")
+
+    

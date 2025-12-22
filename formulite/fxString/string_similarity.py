@@ -1,9 +1,18 @@
 import sys
 import importlib
-from typing import Union, List, Dict, Any, Tuple
+import difflib
+from collections import deque
+from typing import Union, List, Dict, Any, Tuple, Optional, Literal
 
-# Diccionario para almacenar módulos importados de forma "lazy"
+
 _lazy_loaded_modules = {}
+
+# Type alias para los algoritmos disponibles
+AlgorithmType = Literal[
+    'metaphone', 'levenshtein', 'hamming', 'ratcliff_obershelp',
+    'sorensen_dice', 'mra', 'needleman_wunsch', 'jaro_winkler',
+    'jaccard', 'lcs'
+]
 
 def _lazy_import(module_name: str, package_name: str = None):
     """
@@ -46,7 +55,212 @@ def _lazy_import(module_name: str, package_name: str = None):
             #raise
         raise # Re-lanza el error para que el programa sepa que la dependencia no está disponible
 
-# Definiciones de clases y funciones
+
+def calculate_similarity(
+    word1: str,
+    word2: str,
+    algorithm: AlgorithmType = 'levenshtein',
+    **kwargs
+) -> Union[bool, float, Dict[str, Any], Tuple[bool, Dict[str, Any]]]:
+    """
+    Función wrapper unificada para calcular similitud entre dos palabras/frases
+    usando el algoritmo especificado.
+
+    Esta función simplifica el uso del módulo permitiendo seleccionar el algoritmo
+    mediante un parámetro string, sin necesidad de instanciar WordSimilarity
+    ni llamar métodos específicos.
+
+    Args:
+        word1 (str): La primera palabra o frase a comparar.
+        word2 (str): La segunda palabra o frase a comparar.
+        algorithm (AlgorithmType): El algoritmo a utilizar. Opciones disponibles:
+            - 'metaphone': Similitud fonética (retorna bool)
+            - 'levenshtein': Distancia de edición (retorna float 0.0-1.0)
+            - 'hamming': Distancia para cadenas de igual longitud (retorna float)
+            - 'ratcliff_obershelp': Subsecuencias comunes (retorna Dict)
+            - 'sorensen_dice': Similitud de tokens (retorna Dict)
+            - 'mra': Match Rating Approach fonético (retorna Dict)
+            - 'needleman_wunsch': Alineación de secuencias (retorna Dict)
+            - 'jaro_winkler': Similitud con peso en prefijo (retorna Dict)
+            - 'jaccard': Índice de similitud de conjuntos (retorna Dict)
+            - 'lcs': Longest Common Subsequence (retorna Dict)
+            - 'effective_same': Determina si son efectivamente iguales (retorna Tuple[bool, Dict])
+            - 'all': Ejecuta todos los algoritmos (retorna Dict completo)
+        **kwargs: Argumentos adicionales según el algoritmo:
+            - Para 'needleman_wunsch': nw_gap_cost (int, default=1)
+            - Para 'effective_same': levenshtein_threshold (float, default=0.85),
+                                    jaro_winkler_threshold (float, default=0.9),
+                                    metaphone_required (bool, default=True)
+
+    Returns:
+        Union[bool, float, Dict, Tuple]: El resultado depende del algoritmo:
+            - bool: Para 'metaphone'
+            - float: Para 'levenshtein', 'hamming'
+            - Dict: Para algoritmos que retornan métricas múltiples
+            - Tuple[bool, Dict]: Para 'effective_same'
+
+    Raises:
+        ValueError: Si el algoritmo especificado no es válido.
+        TypeError: Si los argumentos de entrada no son cadenas.
+
+    Ejemplos:
+        >>> # Uso básico con Levenshtein (por defecto)
+        >>> resultado = calculate_similarity("casa", "caza")
+        >>> print(f"Similitud: {resultado:.2%}")
+        Similitud: 75.00%
+
+        >>> # Similitud fonética
+        >>> resultado = calculate_similarity("conocimiento", "conosimiento", algorithm='metaphone')
+        >>> print(f"¿Suenan igual? {resultado}")
+        ¿Suenan igual? True
+
+        >>> # Jaro-Winkler con métricas detalladas
+        >>> resultado = calculate_similarity("martha", "marhta", algorithm='jaro_winkler')
+        >>> print(f"Score: {resultado['score']:.4f}")
+        Score: 0.9611
+
+        >>> # Determinar equivalencia efectiva
+        >>> resultado, metricas = calculate_similarity(
+        ...     "aplicacion", "aplikacion",
+        ...     algorithm='effective_same'
+        ... )
+        >>> print(f"¿Son la misma? {resultado}")
+        ¿Son la misma? True
+
+        >>> # Ejecutar todos los algoritmos
+        >>> resultados = calculate_similarity("python", "pyton", algorithm='all')
+        >>> print(f"Levenshtein: {resultados['levenshtein_ratio']:.2%}")
+        >>> print(f"Metaphone: {resultados['metaphone_match']}")
+        Levenshtein: 83.33%
+        Metaphone: True
+
+        >>> # Needleman-Wunsch con gap cost personalizado
+        >>> resultado = calculate_similarity(
+        ...     "GATTACA", "GTAC",
+        ...     algorithm='needleman_wunsch',
+        ...     nw_gap_cost=2
+        ... )
+        >>> print(f"Score: {resultado['score']:.4f}")
+        Score: 0.4286
+
+        >>> # Effective same con umbrales personalizados
+        >>> resultado, metricas = calculate_similarity(
+        ...     "color", "colour",
+        ...     algorithm='effective_same',
+        ...     levenshtein_threshold=0.75,
+        ...     jaro_winkler_threshold=0.85,
+        ...     metaphone_required=False
+        ... )
+        >>> print(f"¿Son la misma? {resultado}")
+        ¿Son la misma? True
+
+    Guía de Implementación:
+        1. **Selección Simple de Algoritmo:**
+           Cambia el parámetro `algorithm` para probar diferentes métricas
+           sin cambiar el código de llamada.
+
+        2. **Comparación de Algoritmos:**
+           Usa algorithm='all' para obtener todos los resultados y compararlos:
+           ```python
+           resultados = calculate_similarity(palabra1, palabra2, algorithm='all')
+           for metrica, valor in resultados.items():
+               print(f"{metrica}: {valor}")
+           ```
+
+        3. **Búsqueda Difusa Optimizada:**
+           Para búsquedas rápidas en listas grandes, usa 'metaphone' como filtro
+           inicial y luego 'levenshtein' para refinar:
+           ```python
+           # Filtro rápido
+           if calculate_similarity(query, candidato, algorithm='metaphone'):
+               # Refinamiento
+               ratio = calculate_similarity(query, candidato, algorithm='levenshtein')
+               if ratio > 0.8:
+                   resultados_finales.append(candidato)
+           ```
+
+        4. **Manejo de Casos Específicos:**
+           - Nombres de personas: usa 'jaro_winkler'
+           - Frases o documentos: usa 'sorensen_dice' o 'jaccard'
+           - Secuencias biológicas: usa 'needleman_wunsch'
+           - Validación general: usa 'effective_same'
+
+        5. **Performance:**
+           Los algoritmos están ordenados por velocidad aproximada:
+           metaphone > hamming > levenshtein > jaro_winkler > needleman_wunsch
+
+    Cost:
+        La complejidad depende del algoritmo seleccionado:
+        - metaphone: $O(n)$
+        - levenshtein: $O(m \times n)$
+        - hamming: $O(n)$
+        - jaro_winkler: $O(m \times n)$
+        - needleman_wunsch: $O(m \times n)$
+        - all: $O(k \times m \times n)$ donde k es el número de algoritmos
+    """
+    if not isinstance(word1, str) or not isinstance(word2, str):
+        raise TypeError("Ambos argumentos deben ser cadenas de texto.")
+
+    # Normalizar el nombre del algoritmo
+    algorithm = algorithm.lower().strip()
+
+    # Validar algoritmo
+    valid_algorithms = [
+        'metaphone', 'levenshtein', 'hamming', 'ratcliff_obershelp',
+        'sorensen_dice', 'mra', 'needleman_wunsch', 'jaro_winkler',
+        'jaccard', 'lcs', 'effective_same', 'all'
+    ]
+
+    if algorithm not in valid_algorithms:
+        raise ValueError(
+            f"Algoritmo '{algorithm}' no válido. "
+            f"Opciones disponibles: {', '.join(valid_algorithms)}"
+        )
+
+    # Inicializar WordSimilarity con gap_cost si se especifica
+    nw_gap_cost = kwargs.get('nw_gap_cost', 1)
+    ws = WordSimilarity(nw_gap_cost=nw_gap_cost)
+
+    # Ejecutar el algoritmo solicitado
+    if algorithm == 'metaphone':
+        return ws.metaphone_score(word1, word2)
+
+    elif algorithm == 'levenshtein':
+        return ws.string_levenshtein_score(word1, word2)
+
+    elif algorithm == 'hamming':
+        return ws.string_hamming_score(word1, word2)
+
+    elif algorithm == 'ratcliff_obershelp':
+        return ws.ratcliff_obershelp_score(word1, word2)
+
+    elif algorithm == 'sorensen_dice':
+        return ws.sorensen_dice_score(word1, word2)
+
+    elif algorithm == 'mra':
+        return ws.string_mra_score(word1, word2)
+
+    elif algorithm == 'needleman_wunsch':
+        return ws.needleman_wunsch_score(word1, word2)
+
+    elif algorithm == 'jaro_winkler':
+        return ws.jaro_winkler_score(word1, word2)
+
+    elif algorithm == 'jaccard':
+        return ws.string_jaccard_score(word1, word2)
+
+    elif algorithm == 'lcs':
+        return ws.string_lcs_score(word1, word2)
+
+    elif algorithm == 'effective_same':
+        levenshtein_threshold = kwargs.get('levenshtein_threshold', 0.85)
+        jaro_winkler_threshold = kwargs.get('jaro_winkler_threshold', 0.9)
+        metaphone_required = kwargs.get('metaphone_required', True)
+        return are_words_equivalent(word1, word2, levenshtein_threshold, jaro_winkler_threshold, metaphone_required)
+
+    elif algorithm == 'all':
+        return ws.compare(word1, word2)
+
 
 class WordSimilarity:
     """
@@ -107,11 +321,11 @@ class WordSimilarity:
             Otros métodos lanzarán TypeError si los inputs no son cadenas.
 
         5. Determinación de Equivalencia "Efectiva":
-            Utiliza el método estático `are_words_effectively_the_same`
+            Utiliza el método estático `are_words_equivalent`
             para aplicar un criterio combinado de similitud.
-            >>> WordSimilarity.are_words_effectively_the_same("aplicacion", "aplikacion")
+            >>> WordSimilarity.are_words_equivalent("aplicacion", "aplikacion")
             True
-            >>> WordSimilarity.are_words_effectively_the_same("cat", "dog")
+            >>> WordSimilarity.are_words_equivalent("cat", "dog")
             False
     """
     def __init__(self, nw_gap_cost: int = 1):
@@ -128,7 +342,7 @@ class WordSimilarity:
         td.needleman_wunsch.gap_cost = nw_gap_cost
 
     @staticmethod
-    def metaphone_similarity(word1: str, word2: str) -> bool:
+    def metaphone_score(word1: str, word2: str) -> bool:
         """
         Compara la similitud fonética de dos palabras usando Double Metaphone.
 
@@ -146,22 +360,27 @@ class WordSimilarity:
                   False en caso contrario.
 
         Ejemplos:
-            >>> WordSimilarity.metaphone_similarity("conocimiento", "conosimiento")
+            >>> WordSimilarity.metaphone_score("conocimiento", "conosimiento")
             True
-            >>> WordSimilarity.metaphone_similarity("hello", "hola")
+            >>> WordSimilarity.metaphone_score("hello", "hola")
             False
-            >>> WordSimilarity.metaphone_similarity("smith", "smyth")
+            >>> WordSimilarity.metaphone_score("smith", "smyth")
             True
         """
         if not isinstance(word1, str) or not isinstance(word2, str):
             raise TypeError("Ambos argumentos deben ser cadenas de texto.")
+        
+        # Validación tautológica
+        if word1 == word2:
+            return True
+        
         metaphone = _lazy_import('metaphone') # Importación perezosa
         meta1 = metaphone.doublemetaphone(word1.lower()) # Convertir a minúsculas para consistencia
         meta2 = metaphone.doublemetaphone(word2.lower()) # Convertir a minúsculas para consistencia
         return any(m in meta2 for m in meta1 if m)
 
     @staticmethod
-    def levenshtein_similarity(word1: str, word2: str) -> float:
+    def levenshtein_score(word1: str, word2: str) -> float:
         """
         Calcula el ratio de similitud de Levenshtein entre dos cadenas.
 
@@ -180,22 +399,27 @@ class WordSimilarity:
                    similitud de Levenshtein.
 
         Ejemplos:
-            >>> WordSimilarity.levenshtein_similarity("kitten", "sitting")
+            >>> WordSimilarity.levenshtein_score("kitten", "sitting")
             0.5714285714285714
-            >>> WordSimilarity.levenshtein_similarity("casa", "caza")
+            >>> WordSimilarity.levenshtein_score("casa", "caza")
             0.75
-            >>> WordSimilarity.levenshtein_similarity("apple", "apple")
+            >>> WordSimilarity.levenshtein_score("apple", "apple")
             1.0
-            >>> WordSimilarity.levenshtein_similarity("", "abc")
+            >>> WordSimilarity.levenshtein_score("", "abc")
             0.0
         """
         if not isinstance(word1, str) or not isinstance(word2, str):
             raise TypeError("Ambos argumentos deben ser cadenas de texto.")
+        
+        # Validación tautológica
+        if word1 == word2:
+            return 1.0
+        
         Levenshtein = _lazy_import('Levenshtein', 'python-Levenshtein') # Importación perezosa
         return Levenshtein.ratio(word1, word2)
 
     @staticmethod
-    def hamming_similarity(word1: str, word2: str) -> float:
+    def hamming_score(word1: str, word2: str) -> float:
         """
         Calcula el ratio de similitud de Hamming entre dos cadenas.
 
@@ -216,17 +440,22 @@ class WordSimilarity:
             TypeError: Si los argumentos no son cadenas.
 
         Ejemplos:
-            >>> WordSimilarity.hamming_similarity("karolin", "kathrin")
+            >>> WordSimilarity.hamming_score("karolin", "kathrin")
             0.5714285714285714
-            >>> WordSimilarity.hamming_similarity("rojo", "rosa")
+            >>> WordSimilarity.hamming_score("rojo", "rosa")
             0.5
-            >>> WordSimilarity.hamming_similarity("abc", "abc")
+            >>> WordSimilarity.hamming_score("abc", "abc")
             1.0
-            >>> WordSimilarity.hamming_similarity("abc", "abd")
+            >>> WordSimilarity.hamming_score("abc", "abd")
             0.6666666666666667
         """
         if not isinstance(word1, str) or not isinstance(word2, str):
             raise TypeError("Ambos argumentos deben ser cadenas de texto.")
+        
+        # Validación tautológica
+        if word1 == word2:
+            return 1.0
+        
         if len(word1) != len(word2):
             raise ValueError("Para Hamming, ambas palabras deben tener la misma longitud.")
         if not word1: # Si ambas son cadenas vacías, la distancia es 0, similitud 1.0
@@ -269,7 +498,7 @@ class WordSimilarity:
             'distance': d.distance(a, b),
             'similarity': d.similarity(a, b),
             'normalized_similarity': d.normalized_similarity(a, b),
-            'score': 100.0 * d.normalized_similarity(a, b)
+            'score': d.normalized_similarity(a, b)  # Standardized to 0-1 range
         }
 
     @staticmethod
@@ -310,7 +539,7 @@ class WordSimilarity:
             'distance': d.distance(tokens_a, tokens_b),
             'similarity': d.similarity(tokens_a, tokens_b),
             'normalized_similarity': d.normalized_similarity(tokens_a, tokens_b),
-            'score': 100.0 * d.normalized_similarity(tokens_a, tokens_b)
+            'score': d.normalized_similarity(tokens_a, tokens_b)  # Standardized to 0-1 range
         }
 
     @staticmethod
@@ -348,7 +577,7 @@ class WordSimilarity:
             'distance': d.distance(a, b),
             'similarity': d.similarity(a, b),
             'normalized_similarity': d.normalized_similarity(a, b),
-            'score': 100.0 * d.normalized_similarity(a, b)
+            'score': d.normalized_similarity(a, b)  # Standardized to 0-1 range
         }
 
     @staticmethod
@@ -387,7 +616,7 @@ class WordSimilarity:
             'distance': d.distance(a, b),
             'similarity': d.similarity(a, b),
             'normalized_similarity': d.normalized_similarity(a, b),
-            'score': 100.0 * d.normalized_similarity(a, b)
+            'score': d.normalized_similarity(a, b)  # Standardized to 0-1 range
         }
 
     @staticmethod
@@ -425,7 +654,7 @@ class WordSimilarity:
             'distance': d.distance(a, b),
             'similarity': d.similarity(a, b),
             'normalized_similarity': d.normalized_similarity(a, b),
-            'score': 100.0 * d.normalized_similarity(a, b)
+            'score': d.normalized_similarity(a, b)  # Standardized to 0-1 range
         }
 
     @staticmethod
@@ -465,7 +694,7 @@ class WordSimilarity:
             'distance': d.distance(tokens_a, tokens_b),
             'similarity': d.similarity(tokens_a, tokens_b),
             'normalized_similarity': d.normalized_similarity(tokens_a, tokens_b),
-            'score': 100.0 * d.normalized_similarity(tokens_a, tokens_b)
+            'score': d.normalized_similarity(tokens_a, tokens_b)  # Standardized to 0-1 range
         }
 
     @staticmethod
@@ -526,8 +755,8 @@ class WordSimilarity:
                         dp[i][j] = dp[i][j - 1]
 
         length, seq = dp[n1][n2]
-        percent = 200.0 * length / (n1 + n2) if (n1 + n2) > 0 else 0.0
-        return {'sequence': seq, 'length': length, 'score': percent}
+        similarity = length / max(n1, n2) if max(n1, n2) > 0 else 1.0
+        return {'sequence': seq, 'length': length, 'similarity': similarity}
 
     def compare(self, word1: str, word2: str) -> Dict[str, Any]:
         """
@@ -541,8 +770,17 @@ class WordSimilarity:
         Returns:
             Dict[str, Any]: Un diccionario donde las claves son los nombres
                             de los algoritmos y los valores son sus respectivos
-                            resultados. El valor para 'hamming_ratio' será
-                            None si las longitudes de las palabras difieren.
+                            resultados. Incluye:
+                            - metaphone_match (bool)
+                            - levenshtein_ratio (float)
+                            - hamming_ratio (float o None)
+                            - ratcliff_obershelp (Dict)
+                            - sorensen_dice (Dict)
+                            - mra (Dict)
+                            - needleman_wunsch (Dict)
+                            - jaro_winkler (Dict)
+                            - jaccard (Dict)
+                            - lcs (Dict)
 
         Raises:
             TypeError: Si alguno de los argumentos de entrada no es una cadena.
@@ -574,12 +812,12 @@ class WordSimilarity:
             raise TypeError("Ambos argumentos deben ser cadenas de texto.")
 
         results: Dict[str, Any] = {
-            'metaphone_match': self.metaphone_similarity(word1, word2),
-            'levenshtein_ratio': self.levenshtein_similarity(word1, word2),
+            'metaphone_match': self.metaphone_score(word1, word2),
+            'levenshtein_ratio': self.levenshtein_score(word1, word2),
             'hamming_ratio': None # Inicializar a None, se actualizará si es posible
         }
         try:
-            results['hamming_ratio'] = self.hamming_similarity(word1, word2)
+            results['hamming_ratio'] = self.hamming_score(word1, word2)
         except ValueError:
             # Captura el error de longitud diferente para Hamming y lo ignora,
             # dejando 'hamming_ratio' como None.
@@ -602,10 +840,11 @@ class WordSimilarity:
             'jaccard': self.jaccard_score(word1, word2),
             'lcs': self.lcs_score(word1, word2)
         })
+        
         return results
 
     @staticmethod
-    def are_words_effectively_the_same(
+    def are_words_equivalent(
         word1: str,
         word2: str,
         levenshtein_threshold: float = 0.85,
@@ -649,7 +888,7 @@ class WordSimilarity:
 
         Ejemplos de Uso:
             >>> # Caso 1: Palabras muy similares tipográficamente y fonéticamente
-            >>> result, metrics = WordSimilarity.are_words_effectively_the_same("conocimiento", "conosimiento")
+            >>> result, metrics = WordSimilarity.are_words_equivalent("conocimiento", "conosimiento")
             >>> result
             True
             >>> metrics['metaphone_match']
@@ -658,28 +897,28 @@ class WordSimilarity:
             True
 
             >>> # Caso 2: Palabras diferentes, no deberían coincidir
-            >>> result, metrics = WordSimilarity.are_words_effectively_the_same("casa", "perro")
+            >>> result, metrics = WordSimilarity.are_words_equivalent("casa", "perro")
             >>> result
             False
             >>> metrics['levenshtein_ratio'] < 0.85
             True
 
             >>> # Caso 3: Palabras con un pequeño error, pero fonéticamente iguales (metaphone_required=True)
-            >>> result, metrics = WordSimilarity.are_words_effectively_the_same("aplicacion", "aplikacion")
+            >>> result, metrics = WordSimilarity.are_words_equivalent("aplicacion", "aplikacion")
             >>> result
             True
 
             >>> # Caso 4: Similar tipográficamente pero fonéticamente diferente (si metaphone_required=True)
-            >>> result, metrics = WordSimilarity.are_words_effectively_the_same("cat", "cut")
+            >>> result, metrics = WordSimilarity.are_words_equivalent("cat", "cut")
             >>> result
             False
             >>> # Si metaphone_required fuera False, podría dar True dependiendo de los umbrales
-            >>> result, metrics = WordSimilarity.are_words_effectively_the_same("cat", "cut", metaphone_required=False)
+            >>> result, metrics = WordSimilarity.are_words_equivalent("cat", "cut", metaphone_required=False)
             >>> result # Puede ser True si los umbrales son bajos y la similitud tipográfica es alta
             True
 
             >>> # Caso 5: Nombres propios con ligeras variaciones
-            >>> result, metrics = WordSimilarity.are_words_effectively_the_same("Smith", "Smyth")
+            >>> result, metrics = WordSimilarity.are_words_equivalent("Smith", "Smyth")
             >>> result
             True
 
@@ -709,10 +948,19 @@ class WordSimilarity:
             raise TypeError("Ambos argumentos deben ser cadenas de texto.")
         if not isinstance(levenshtein_threshold, (int, float)) or not (0.0 <= levenshtein_threshold <= 1.0):
             raise ValueError("levenshtein_threshold debe ser un flotante entre 0.0 y 1.0.")
-        if not isinstance(jaro_winkler_threshold, (int, float)) or not (0.0 <= jaro_winkler_threshold <= 100.0):
-            raise ValueError("jaro_winkler_threshold debe ser un flotante entre 0.0 y 100.0 (es un score).")
+        if not isinstance(jaro_winkler_threshold, (int, float)) or not (0.0 <= jaro_winkler_threshold <= 1.0):
+            raise ValueError("jaro_winkler_threshold debe ser un flotante entre 0.0 y 1.0.")
         if not isinstance(metaphone_required, bool):
             raise TypeError("metaphone_required debe ser un booleano.")
+        
+        # Validación tautológica
+        if word1 == word2:
+            return True, {
+                'exact_match': True,
+                'metaphone_match': True,
+                'levenshtein_ratio': 1.0,
+                'jaro_winkler_similarity': 1.0
+            }
 
         # Asegurarse de que las palabras estén en minúsculas para comparaciones consistentes
         # Esto es importante para Levenshtein y Jaro-Winkler si se quiere insensibilidad a mayúsculas
@@ -726,29 +974,30 @@ class WordSimilarity:
                 'exact_match': True,
                 'metaphone_match': True,
                 'levenshtein_ratio': 1.0,
-                'jaro_winkler_score': 100.0
+                'jaro_winkler_similarity': 1.0
             }
 
         # Calcular las métricas relevantes
-        metaphone_match = WordSimilarity.metaphone_similarity(w1_lower, w2_lower)
-        lev_ratio = WordSimilarity.levenshtein_similarity(w1_lower, w2_lower)
-        jaro_score = WordSimilarity.jaro_winkler_score(w1_lower, w2_lower)['score']
+        metaphone_match = WordSimilarity.metaphone_score(w1_lower, w2_lower)
+        lev_ratio = WordSimilarity.levenshtein_score(w1_lower, w2_lower)
+        jaro_similarity = WordSimilarity.jaro_winkler_score(w1_lower, w2_lower)['normalized_similarity']
 
         results_metrics = {
             'exact_match': False,
             'metaphone_match': metaphone_match,
             'levenshtein_ratio': lev_ratio,
-            'jaro_winkler_score': jaro_score
+            'jaro_winkler_similarity': jaro_similarity
         }
 
         # Aplicar los criterios
         is_lev_similar = lev_ratio >= levenshtein_threshold
-        is_jaro_similar = jaro_score >= jaro_winkler_threshold
+        is_jaro_similar = jaro_similarity >= jaro_winkler_threshold
+        algorithm_difference = abs(jaro_winkler_threshold - levenshtein_threshold)
 
         if metaphone_required:
-            final_decision = metaphone_match and is_lev_similar and is_jaro_similar
+            final_decision = metaphone_match and is_lev_similar and is_jaro_similar and algorithm_difference < 0.05
         else:
-            final_decision = is_lev_similar and is_jaro_similar # o combinar con OR si es menos estricto
+            final_decision = is_lev_similar and is_jaro_similar and algorithm_difference < 0.05
 
         return final_decision, results_metrics
 
@@ -796,6 +1045,10 @@ def has_same_words(string_one: str, string_two: str) -> bool:
     """
     if not isinstance(string_one, str) or not isinstance(string_two, str):
         raise TypeError("Both inputs must be strings.")
+    
+    # Validación tautológica
+    if string_one == string_two:
+        return True
 
     # Convert strings to lowercase and split them into words.
     # We convert to lowercase so that case differences don't affect the comparison.
@@ -852,6 +1105,10 @@ def find_common_words(string_one: str, string_two: str) -> List[str]:
     """
     if not isinstance(string_one, str) or not isinstance(string_two, str):
         raise TypeError("Both inputs must be strings.")
+    
+    # Validación tautológica
+    if string_one == string_two:
+        return string_one.lower().split()
 
     # Convert strings to lowercase and split into words.
     # Lowercasing ensures that case differences (e.g., "The" vs. "the")
@@ -927,6 +1184,10 @@ def has_same_characters(string_one: str, string_two: str) -> bool:
     """
     if not isinstance(string_one, str) or not isinstance(string_two, str):
         raise TypeError("Both inputs must be strings.")
+    
+    # Validación tautológica
+    if string_one == string_two:
+        return True
 
     # Convert each string into a set of its characters.
     # Sets are used because they only store unique elements. This automatically
@@ -939,7 +1200,8 @@ def has_same_characters(string_one: str, string_two: str) -> bool:
     # If the sets are equal, it means they contain the exact same unique characters.
     return set_one == set_two
 
-def are_words_effectively_the_same(
+
+def are_words_equivalent(
     word1: str,
     word2: str,
     levenshtein_threshold: float = 0.85,
@@ -952,7 +1214,7 @@ def are_words_effectively_the_same(
     de similitud.
 
     Esta función de nivel superior es un wrapper para el método estático
-    WordSimilarity.are_words_effectively_the_same.
+    WordSimilarity.are_words_equivalent.
 
     Este enfoque combina la similitud fonética (Metaphone) con métricas
     de distancia de edición (Levenshtein y Jaro-Winkler) para ofrecer
@@ -986,7 +1248,7 @@ def are_words_effectively_the_same(
 
     Ejemplos de Uso:
         >>> # Caso 1: Palabras muy similares tipográficamente y fonéticamente
-        >>> result, metrics = are_words_effectively_the_same("conocimiento", "conosimiento")
+        >>> result, metrics = are_words_equivalent("conocimiento", "conosimiento")
         >>> result
         True
         >>> metrics['metaphone_match']
@@ -995,7 +1257,7 @@ def are_words_effectively_the_same(
         True
 
         >>> # Caso 2: Palabras diferentes, no deberían coincidir
-        >>> result, metrics = are_words_effectively_the_same("casa", "perro")
+        >>> result, metrics = are_words_equivalent("casa", "perro")
         >>> result
         False
         >>> metrics['levenshtein_ratio'] < 0.85
@@ -1006,12 +1268,483 @@ def are_words_effectively_the_same(
         de "igualdad efectiva" sin necesidad de instanciar `WordSimilarity`
         explícitamente. Permite un control fino sobre los umbrales de decisión.
     """
-    return WordSimilarity.are_words_effectively_the_same(
+    return WordSimilarity.are_words_equivalent(
         word1, word2,
         levenshtein_threshold,
         jaro_winkler_threshold,
         metaphone_required
     )
+
+
+def string_hamming_score(a: str, b: str) -> Dict[str, float]:
+    """
+    Calculates the Hamming similarity scores between two strings.
+
+    The Hamming distance measures the minimum number of substitutions required
+    to change one string into another. Only applicable to strings of equal length.
+    Counts the number of positions in which the corresponding symbols are different.
+
+    Args:
+        a (str): The first string to compare.
+        b (str): The second string to compare.
+
+    Returns:
+        Dict[str, float]: Dictionary with:
+            - 'distance': Number of differing positions.
+            - 'similarity': Normalized similarity (0.0 to 1.0).
+            - 'score': Similarity as percentage (0.0 to 100.0).
+
+    Examples:
+        >>> string_hamming_score('text', 'test')
+        {'distance': 1, 'similarity': 0.75, 'score': 75.0}
+        >>> string_hamming_score('arrow', 'arow')
+        {'distance': 3, 'similarity': 0.4, 'score': 40.0}
+
+    Cost:
+        $O(n)$ where n is the length of the strings.
+    """
+    td = _lazy_import('textdistance')
+    return {
+        "distance": td.hamming.distance(a, b),
+        "similarity": td.hamming.normalized_similarity(a, b),
+        "score": 100.0 * td.hamming.normalized_similarity(a, b)
+    }
+
+
+def string_mra_score(a: str, b: str) -> Dict[str, float]:
+    """
+    Calculates the Match Rating Approach (MRA) similarity scores.
+
+    The MRA algorithm is a phonetic matching algorithm designed for comparing names.
+    It generates a classification code for each string and calculates distance
+    based on comparing these codes. Particularly useful for name matching.
+
+    Args:
+        a (str): The first string to compare.
+        b (str): The second string to compare.
+
+    Returns:
+        Dict[str, float]: Dictionary with:
+            - 'distance': MRA distance value.
+            - 'similarity': Normalized similarity (0.0 to 1.0).
+            - 'score': Similarity as percentage (0.0 to 100.0).
+
+    Examples:
+        >>> string_mra_score('Schmitt', 'Schmidt')
+        {'distance': ..., 'similarity': 0.833, 'score': 83.3}
+        >>> string_mra_score('John', 'Jon')
+        {'distance': ..., 'similarity': 1.0, 'score': 100.0}
+
+    Cost:
+        $O(n + m)$ where n and m are the lengths of the strings.
+    """
+    td = _lazy_import('textdistance')
+    return {
+        "distance": td.mra.distance(a, b),
+        "similarity": td.mra.normalized_similarity(a, b),
+        "score": 100.0 * td.mra.normalizsed_similarity(a, b)
+    }
+
+
+def string_sorensendice_score(a: str, b: str) -> Dict[str, float]:
+    """
+    Calculates the Sørensen-Dice similarity coefficient based on tokens (words).
+
+    This coefficient measures the similarity between two sets by finding common tokens
+    and dividing by the total number of tokens. The strings are divided into words
+    (tokens) by whitespace, making it useful for comparing phrases or documents.
+
+    Formula: 2 * |common_tokens| / (|tokens_a| + |tokens_b|)
+
+    Args:
+        a (str): The first string to compare (will be tokenized).
+        b (str): The second string to compare (will be tokenized).
+
+    Returns:
+        Dict[str, float]: Dictionary with:
+            - 'distance': Sørensen-Dice distance (1 - similarity).
+            - 'similarity': Normalized similarity (0.0 to 1.0).
+            - 'score': Similarity as percentage (0.0 to 100.0).
+
+    Examples:
+        >>> string_sorensendice_score('hello world', 'world hello')
+        {'distance': 0.0, 'similarity': 1.0, 'score': 100.0}
+        >>> string_sorensendice_score('hello new world', 'hello world')
+        {'distance': 0.2, 'similarity': 0.8, 'score': 80.0}
+
+    Cost:
+        $O(n + m)$ where n and m are the number of tokens.
+    """
+    td = _lazy_import('textdistance')
+    a_tokens = a.split()
+    b_tokens = b.split()
+    return {
+        "distance": td.sorensen.distance(a_tokens, b_tokens),
+        "similarity": td.sorensen.normalized_similarity(a_tokens, b_tokens),
+        "score": 100.0 * td.sorensen.normalized_similarity(a_tokens, b_tokens)
+    }
+
+
+def string_levenshtein_score(a: str, b: str) -> Dict[str, float]:
+    """
+    Calculates the Levenshtein (edit) distance and similarity scores.
+
+    The Levenshtein distance counts the minimum number of single-character edits
+    (insertions, deletions, or substitutions) needed to transform one string into
+    another. Also known as Damerau-Levenshtein distance when it includes transpositions.
+
+    Args:
+        a (str): The first string to compare.
+        b (str): The second string to compare.
+
+    Returns:
+        Dict[str, float]: Dictionary with:
+            - 'distance': Number of edits required.
+            - 'similarity': Normalized similarity (0.0 to 1.0).
+            - 'score': Similarity as percentage (0.0 to 100.0).
+
+    Examples:
+        >>> string_levenshtein_score('kitten', 'sitting')
+        {'distance': 3, 'similarity': 0.571, 'score': 57.1}
+        >>> string_levenshtein_score('casa', 'caza')
+        {'distance': 1, 'similarity': 0.75, 'score': 75.0}
+
+    Cost:
+        $O(m \\times n)$ where m and n are the lengths of the strings.
+    """
+    td = _lazy_import('textdistance')
+    return {
+        "distance": td.levenshtein.distance(a, b),
+        "similarity": td.levenshtein.normalized_similarity(a, b),
+        "score": 100.0 * td.levenshtein.normalized_similarity(a, b)
+    }
+
+
+def string_dna_score(a: str, b: str) -> Dict[str, float]:
+    """
+    Calculates the Needleman-Wunsch similarity scores (DNA sequence alignment).
+
+    This algorithm is commonly used in bioinformatics to align DNA or protein sequences.
+    It finds the optimal global alignment between two sequences, considering costs
+    for matches, mismatches, and gaps. The gap cost is configurable (default: 1).
+
+    Args:
+        a (str): The first string/sequence to compare.
+        b (str): The second string/sequence to compare.
+
+    Returns:
+        Dict[str, float]: Dictionary with:
+            - 'distance': Needleman-Wunsch distance.
+            - 'similarity': Normalized similarity (can be negative).
+            - 'score': Similarity as percentage (-100.0 to 100.0).
+
+    Examples:
+        >>> string_dna_score('AAAGGT', 'ATACGGA')
+        {'distance': 3.0, 'similarity': -0.428, 'score': -42.8}
+        >>> string_dna_score('casa', 'caza')
+        {'distance': 1.0, 'similarity': 0.75, 'score': 75.0}
+
+    Note:
+        Gap cost can be adjusted via textdistance.needleman_wunsch.gap_cost.
+
+    Cost:
+        $O(m \\times n)$ where m and n are the lengths of the sequences.
+    """
+    td = _lazy_import('textdistance')
+    td.needleman_wunsch.gap_cost = 1
+    return {
+        "distance": td.needleman_wunsch.distance(a, b),
+        "similarity": td.needleman_wunsch.normalized_similarity(a, b),
+        "score": 100.0 * td.needleman_wunsch.normalized_similarity(a, b)
+    }
+
+
+def string_jarowinkler_score(a: str, b: str) -> Dict[str, float]:
+    """
+    Calculates the Jaro-Winkler similarity scores.
+
+    The Jaro-Winkler algorithm is a variant of Jaro that gives more weight to
+    matching prefixes. It's particularly effective for comparing short strings
+    or names with typographical errors at the beginning. Higher scores for strings
+    with common prefixes.
+
+    Args:
+        a (str): The first string to compare.
+        b (str): The second string to compare.
+
+    Returns:
+        Dict[str, float]: Dictionary with:
+            - 'distance': Jaro-Winkler distance (1 - similarity).
+            - 'similarity': Normalized similarity (0.0 to 1.0).
+            - 'score': Similarity as percentage (0.0 to 100.0).
+
+    Examples:
+        >>> string_jarowinkler_score('DwAyNE', 'DuANE')
+        {'distance': 0.178, 'similarity': 0.822, 'score': 82.2}
+        >>> string_jarowinkler_score('TRATE', 'TRACE')
+        {'distance': 0.093, 'similarity': 0.907, 'score': 90.7}
+        >>> string_jarowinkler_score('martha', 'marhta')
+        {'distance': 0.039, 'similarity': 0.961, 'score': 96.1}
+
+    Cost:
+        $O(m \\times n)$ where m and n are the lengths of the strings.
+    """
+    td = _lazy_import('textdistance')
+    return {
+        "distance": td.jaro_winkler.distance(a, b),
+        "similarity": td.jaro_winkler.normalized_similarity(a, b),
+        "score": 100.0 * td.jaro_winkler.normalized_similarity(a, b)
+    }
+
+
+def string_jaccard_score(a: str, b: str) -> Dict[str, float]:
+    """
+    Calculates the Jaccard similarity index based on tokens (words).
+
+    The Jaccard index measures similarity between two sets as the cardinality
+    of their intersection divided by the cardinality of their union. Strings
+    are tokenized by whitespace. Useful for measuring word overlap in phrases
+    or documents.
+
+    Formula: |intersection| / |union| = |A ∩ B| / |A ∪ B|
+
+    Args:
+        a (str): The first string to compare (will be tokenized).
+        b (str): The second string to compare (will be tokenized).
+
+    Returns:
+        Dict[str, float]: Dictionary with:
+            - 'distance': Jaccard distance (1 - similarity).
+            - 'similarity': Normalized similarity (0.0 to 1.0).
+            - 'score': Similarity as percentage (0.0 to 100.0).
+
+    Examples:
+        >>> string_jaccard_score('hello world', 'world hello')
+        {'distance': 0.0, 'similarity': 1.0, 'score': 100.0}
+        >>> string_jaccard_score('hello new world', 'hello world')
+        {'distance': 0.333, 'similarity': 0.667, 'score': 66.7}
+
+    Cost:
+        $O(n + m)$ where n and m are the number of tokens.
+    """
+    td = _lazy_import('textdistance')
+    a_tokens = a.split()
+    b_tokens = b.split()
+    return {
+        "distance": td.jaccard.distance(a_tokens, b_tokens),
+        "similarity": td.jaccard.normalized_similarity(a_tokens, b_tokens),
+        "score": 100.0 * td.jaccard.normalized_similarity(a_tokens, b_tokens)
+    }
+
+
+def string_ratcliffobershelp_score(a: str, b: str) -> Dict[str, float]:
+    """
+    Calculates the Ratcliff-Obershelp pattern recognition similarity scores.
+
+    This algorithm finds the longest common substring from two strings, removes
+    that part from both, and splits at the same location. It repeats this process
+    recursively on the left and right parts until no significant common substrings
+    remain. Effective for comparing strings with common subsequences even if not
+    in the same order.
+
+    Args:
+        a (str): The first string to compare.
+        b (str): The second string to compare.
+
+    Returns:
+        Dict[str, float]: Dictionary with:
+            - 'distance': Ratcliff-Obershelp distance.
+            - 'similarity': Normalized similarity (0.0 to 1.0).
+            - 'score': Similarity as percentage (0.0 to 100.0).
+
+    Examples:
+        >>> string_ratcliffobershelp_score('i am going home', 'gone home')
+        {'distance': 0.34, 'similarity': 0.66, 'score': 66.0}
+        >>> string_ratcliffobershelp_score('test', 'text')
+        {'distance': 0.25, 'similarity': 0.75, 'score': 75.0}
+        >>> string_ratcliffobershelp_score('arrow', 'arow')
+        {'distance': 0.11, 'similarity': 0.89, 'score': 88.9}
+
+    Cost:
+        $O(m \\times n)$ in the average case, can be slower for complex patterns.
+    """
+    td = _lazy_import('textdistance')
+    return {
+        "distance": td.ratcliff_obershelp.distance(a, b),
+        "similarity": td.ratcliff_obershelp.normalized_similarity(a, b),
+        "score": 100.0 * td.ratcliff_obershelp.normalized_similarity(a, b)
+    }
+
+
+def string_diflib_seqmatch_score(a: str, b: str) -> float:
+    """
+    Calculates the similarity score using difflib.SequenceMatcher.
+
+    This function uses Python's built-in difflib library to compute the ratio
+    of the longest common subsequence between two strings. It's equivalent to
+    the LCS-based calculation and provides a quick similarity measure.
+
+    Args:
+        a (str): The first string to compare.
+        b (str): The second string to compare.
+
+    Returns:
+        float: The similarity score as percentage (0.0 to 100.0).
+
+    Examples:
+        >>> string_diflib_seqmatch_score('kitten', 'sitting')
+        57.14
+        >>> string_diflib_seqmatch_score('hello', 'hello')
+        100.0
+
+    Cost:
+        $O(m \\times n)$ where m and n are the lengths of the strings.
+    """
+    return 100.0 * difflib.SequenceMatcher(a=a, b=b).ratio()
+
+
+def string_lcs_score(a: str, b: str) -> float:
+    """
+    Calculates the Longest Common Subsequence (LCS) similarity score.
+
+    The LCS is the longest sequence that appears in both strings in the same
+    order, but not necessarily contiguously. The score is calculated as
+    200 * LCS_length / (len_a + len_b), providing a percentage-like metric.
+
+    Args:
+        a (str): The first string to compare.
+        b (str): The second string to compare.
+
+    Returns:
+        float: The LCS similarity score as percentage (0.0 to 100.0).
+
+    Examples:
+        >>> string_lcs_score('ABCBDAB', 'BDCABA')
+        66.67  # LCS is 'BCBA' with length 4
+        >>> string_lcs_score('hello', 'hallo')
+        80.0
+
+    Cost:
+        $O(m \\times n)$ where m and n are the lengths of the strings.
+    """
+    n1 = len(a)
+    n2 = len(b)
+    if n1 == 0 or n2 == 0:
+        return 0.0
+    previous = []
+    for i in range(n2):
+        previous.append(0)
+    over = 0
+    for ch1 in a:
+        left = corner = 0
+        for ch2 in b:
+            over = previous.pop(0)
+            if ch1 == ch2:
+                this = corner + 1
+            else:
+                this = over if over >= left else left
+            previous.append(this)
+            left, corner = this, over
+    return 200.0 * previous.pop() / (n1 + n2)
+
+
+def string_lcs_record(a: str, b: str) -> Tuple[float, str]:
+    """
+    Calculates the Longest Common Subsequence (LCS) score and extracts the actual LCS string.
+
+    This function not only computes the similarity score but also returns the actual
+    longest common subsequence found between the two strings. Useful for understanding
+    which parts of the strings match.
+
+    Args:
+        a (str): The first string to compare.
+        b (str): The second string to compare.
+
+    Returns:
+        Tuple[float, str]: A tuple containing:
+            - score: The LCS similarity score as percentage (0.0 to 100.0).
+            - sequence: The actual longest common subsequence string.
+
+    Examples:
+        >>> string_lcs_record('ABCBDAB', 'BDCABA')
+        (66.67, 'BCBA')
+        >>> string_lcs_record('hello world', 'hola mundo')
+        (36.36, 'lo od')
+
+    Cost:
+        $O(m \\times n)$ where m and n are the lengths of the strings.
+    """
+    n1 = len(a)
+    n2 = len(b)
+    if n1 == 0 or n2 == 0:
+        return 0.0, ''
+    previous = deque()
+    for i in range(n2):
+        previous.append((0, ''))
+    over = (0, '')
+    for i in range(n1):
+        left = corner = (0, '')
+        for j in range(n2):
+            over = previous.popleft()
+            if a[i] == b[j]:
+                this = (corner[0] + 1, corner[1] + a[i])
+            else:
+                this = max(over, left)
+            previous.append(this)
+            left, corner = this, over
+    score = 200.0 * this[0] / (n1 + n2)
+    return score, this[1]
+
+
+def string_similarity_score(a: str, b: str) -> List[Tuple[str, Union[Dict[str, float], float]]]:
+    """
+    Calculates similarity scores using multiple string comparison algorithms.
+
+    This comprehensive function computes similarity metrics using eight different
+    algorithms, providing a complete overview of how similar two strings are from
+    various perspectives (phonetic, edit distance, token-based, pattern matching).
+
+    Algorithms included:
+    - Hamming: Character position differences
+    - MRA: Phonetic matching for names
+    - Sørensen-Dice: Token-based similarity
+    - Levenshtein: Edit distance
+    - DNA (Needleman-Wunsch): Sequence alignment
+    - Jaro-Winkler: Prefix-weighted similarity
+    - Jaccard: Set intersection/union
+    - Ratcliff-Obershelp: Pattern recognition
+
+    Args:
+        a (str): The first string to compare.
+        b (str): The second string to compare.
+
+    Returns:
+        List[Tuple[str, Union[Dict[str, float], float]]]: List of tuples where each
+            tuple contains the algorithm name and its result (either a dict with
+            'distance', 'similarity', 'score' or a float score).
+
+    Examples:
+        >>> scores = string_similarity_score('hello', 'hallo')
+        >>> for name, result in scores:
+        ...     print(f"{name}: {result}")
+        hamming: {'distance': 1, 'similarity': 0.8, 'score': 80.0}
+        mra: {'distance': 0.0, 'similarity': 1.0, 'score': 100.0}
+        ...
+
+    Cost:
+        Varies by algorithm, up to $O(m \\times n)$ for most algorithms.
+    """
+    lscores = []
+    lscores.append(('hamming', string_hamming_score(a, b)))
+    lscores.append(('mra', string_mra_score(a, b)))
+    lscores.append(('sorensendice', string_sorensendice_score(a, b)))
+    lscores.append(('levenshtein', string_levenshtein_score(a, b)))
+    lscores.append(('dna', string_dna_score(a, b)))
+    lscores.append(('jarowinkler', string_jarowinkler_score(a, b)))
+    lscores.append(('jaccard', string_jaccard_score(a, b)))
+    lscores.append(('ratcliffobershelp', string_ratcliffobershelp_score(a, b)))
+    return lscores
+
 
 if __name__ == "__main__":
     print("--- Demostración de Comparación de Similitud de Palabras ---")
@@ -1033,8 +1766,8 @@ if __name__ == "__main__":
     except ImportError as e:
         print(f"No se pudieron calcular todas las métricas debido a una librería faltante: {e}")
 
-    # Batería de Ejemplos para are_words_effectively_the_same()
-    print("\n--- Demostración de 'are_words_effectively_the_same' (Mejores Prácticas) ---")
+    # Batería de Ejemplos para are_words_equivalent()
+    print("\n--- Demostración de 'are_words_equivalent' (Mejores Prácticas) ---")
 
     test_cases = [
         ("conocimiento", "conosimiento", True),  # Similares fonéticamente y tipográficamente
@@ -1059,11 +1792,11 @@ if __name__ == "__main__":
     print("\nCasos de Prueba con umbrales por defecto (Levenshtein>=0.85, Jaro-Winkler>=0.9, Metaphone requerido=True):")
     for word1, word2, expected in test_cases:
         try:
-            result, metrics = are_words_effectively_the_same(word1, word2)
+            result, metrics = are_words_equivalent(word1, word2)
             status = "PASÓ" if result == expected else "FALLÓ"
             print(f"\nPalabras: '{word1}', '{word2}'")
             print(f"  Decisión Esperada: {expected}, Decisión Obtenida: {result} - {status}")
-            print(f"  Métricas de Decisión: Metaphone Match={metrics['metaphone_match']:.0f}, Levenshtein Ratio={metrics['levenshtein_ratio']:.4f}, Jaro-Winkler Score={metrics['jaro_winkler_score']:.4f}")
+            print(f"  Métricas de Decisión: Metaphone Match={metrics['metaphone_match']:.0f}, Levenshtein Ratio={metrics['levenshtein_ratio']:.4f}, Jaro-Winkler Similarity={metrics['jaro_winkler_similarity']:.4f}")
         except ImportError as e:
             print(f"\nSaltando prueba para '{word1}', '{word2}' debido a una librería faltante: {e}")
 
@@ -1092,5 +1825,106 @@ if __name__ == "__main__":
     print(f"'apple', 'aple': {has_same_characters('apple', 'aple')}")
     print(f"'', '': {has_same_characters('', '')}")
     print(f"'a', '': {has_same_characters('a', '')}")
+
+    # Demostración del wrapper calculate_similarity
+    print("\n" + "="*80)
+    print("--- Demostración del Wrapper calculate_similarity() ---")
+    print("="*80)
+
+    print("\n1. USO BÁSICO - Levenshtein (por defecto)")
+    print("-" * 50)
+    resultado = calculate_similarity("casa", "caza")
+    print(f"calculate_similarity('casa', 'caza')")
+    print(f"  Resultado: {resultado:.2%}")
+
+    print("\n2. SIMILITUD FONÉTICA - Metaphone")
+    print("-" * 50)
+    resultado = calculate_similarity("conocimiento", "conosimiento", algorithm='metaphone')
+    print(f"calculate_similarity('conocimiento', 'conosimiento', algorithm='metaphone')")
+    print(f"  ¿Suenan igual?: {resultado}")
+
+    print("\n3. JARO-WINKLER - Excelente para nombres")
+    print("-" * 50)
+    resultado = calculate_similarity("martha", "marhta", algorithm='jaro_winkler')
+    print(f"calculate_similarity('martha', 'marhta', algorithm='jaro_winkler')")
+    print(f"  Score: {resultado['score']:.4f}")
+    print(f"  Normalized Similarity: {resultado['normalized_similarity']:.4f}")
+
+    print("\n4. EQUIVALENCIA EFECTIVA - Criterio combinado")
+    print("-" * 50)
+    resultado, metricas = calculate_similarity("aplicacion", "aplikacion", algorithm='effective_same')
+    print(f"calculate_similarity('aplicacion', 'aplikacion', algorithm='effective_same')")
+    print(f"  ¿Son la misma?: {resultado}")
+    print(f"  Métricas:")
+    for key, value in metricas.items():
+        print(f"    {key}: {value}")
+
+    print("\n5. LCS - Longest Common Subsequence")
+    print("-" * 50)
+    resultado = calculate_similarity("ABCBDAB", "BDCABA", algorithm='lcs')
+    print(f"calculate_similarity('ABCBDAB', 'BDCABA', algorithm='lcs')")
+    print(f"  Secuencia común: '{resultado['sequence']}'")
+    print(f"  Longitud: {resultado['length']}")
+    print(f"  Similarity: {resultado['similarity']:.4f}")
+
+    print("\n6. TODOS LOS ALGORITMOS - Comparación completa")
+    print("-" * 50)
+    resultados = calculate_similarity("python", "pyton", algorithm='all')
+    print(f"calculate_similarity('python', 'pyton', algorithm='all')")
+    print("  Resultados seleccionados:")
+    print(f"    Metaphone Match: {resultados['metaphone_match']}")
+    print(f"    Levenshtein Ratio: {resultados['levenshtein_ratio']:.4f}")
+    print(f"    Jaro-Winkler Score: {resultados['jaro_winkler']['score']:.4f}")
+    print(f"    LCS: '{resultados['lcs']['sequence']}' (longitud: {resultados['lcs']['length']})")
+
+    print("\n7. COMPARACIÓN DE FRASES - Sørensen-Dice")
+    print("-" * 50)
+    resultado = calculate_similarity(
+        "the quick brown fox",
+        "a quick red fox",
+        algorithm='sorensen_dice'
+    )
+    print(f"calculate_similarity('the quick brown fox', 'a quick red fox', algorithm='sorensen_dice')")
+    print(f"  Score: {resultado['score']:.4f}")
+    print(f"  Similarity: {resultado['normalized_similarity']:.4f}")
+
+    print("\n8. NEEDLEMAN-WUNSCH - Con gap cost personalizado")
+    print("-" * 50)
+    resultado = calculate_similarity("GATTACA", "GTAC", algorithm='needleman_wunsch', nw_gap_cost=2)
+    print(f"calculate_similarity('GATTACA', 'GTAC', algorithm='needleman_wunsch', nw_gap_cost=2)")
+    print(f"  Score: {resultado['score']:.4f}")
+    print(f"  Normalized Similarity: {resultado['normalized_similarity']:.4f}")
+
+    print("\n9. EFFECTIVE SAME - Con umbrales personalizados")
+    print("-" * 50)
+    resultado, metricas = calculate_similarity(
+        "color", "colour",
+        algorithm='effective_same',
+        levenshtein_threshold=0.75,
+        jaro_winkler_threshold=0.85,
+        metaphone_required=False
+    )
+    print(f"calculate_similarity('color', 'colour', algorithm='effective_same', ...)")
+    print(f"  ¿Son la misma?: {resultado}")
+    print(f"  Levenshtein Ratio: {metricas['levenshtein_ratio']:.4f}")
+
+    print("\n10. USO EN BÚSQUEDA DIFUSA (Ejemplo práctico)")
+    print("-" * 50)
+    diccionario = ["aplicacion", "computadora", "programacion", "desarrollo", "software"]
+    consulta = "aplikacion"
+    print(f"Buscar '{consulta}' en diccionario: {diccionario}")
+    print("\nCoincidencias (Levenshtein > 0.75):")
+    coincidencias = []
+    for palabra in diccionario:
+        ratio = calculate_similarity(consulta, palabra, algorithm='levenshtein')
+        if ratio > 0.75:
+            coincidencias.append((palabra, ratio))
+    coincidencias.sort(key=lambda x: x[1], reverse=True)
+    for palabra, ratio in coincidencias:
+        print(f"  {palabra}: {ratio:.2%}")
+
+    print("\n" + "="*80)
+    print("--- Fin de la demostración del wrapper ---")
+    print("="*80)
 
     print("\n--- Fin de la demostración ---")

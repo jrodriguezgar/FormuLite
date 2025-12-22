@@ -4,6 +4,49 @@ import re
 import json
 
 
+def replace_void(primary_value: Any, replacement_value: Any = 'NaN') -> Any:
+    """Replaces empty or None values with a specified replacement value.
+
+    Problem/User Need: When handling data, it's common to need to replace empty,
+    None, or zero-length values with a default value to ensure data consistency.
+
+    Args:
+        primary_value (Any): The primary value to check.
+        replacement_value (Any): The value to use if primary_value is empty/None.
+
+    Returns:
+        Any: replacement_value if primary_value is empty/None/zero-length,
+             otherwise returns primary_value.
+
+    Example:
+        >>> replace_void("", "default")
+        'default'
+        >>> replace_void(None, 0)
+        0
+        >>> replace_void([], [1, 2, 3])
+        [1, 2, 3]
+        >>> replace_void("hello", "default")
+        'hello'
+        >>> replace_void(0, 42)
+        0  # 0 is not considered void
+        
+    Cost:
+        Time complexity: O(1) for most types
+        Space complexity: O(1)
+    """
+    # Check for None first as it's the most common case
+    if primary_value is None:
+        return replacement_value
+    
+    # For strings, lists, tuples, sets, dicts - check if empty
+    if isinstance(primary_value, (str, list, tuple, set, dict)):
+        if len(primary_value) == 0:
+            return replacement_value
+            
+    # Return original value if not void
+    return primary_value
+
+
 def none_to_string(value: str | None) -> str:
     """
     Converts a None value to an empty string; otherwise, returns the original value.
@@ -44,14 +87,15 @@ def string_to_integer(input_string: str) -> int | None:
     """Converts a string to an integer, returning None if conversion fails.
 
     This function attempts to convert the given `input_string` into an integer.
-    It returns `None` if the string cannot be safely converted (e.g., if it
-    contains non-numeric characters that prevent integer parsing).
+    It first cleans the string by removing all non-numeric characters except
+    digits, '-', and '+'. It returns `None` if the cleaned string cannot be
+    safely converted to an integer.
 
     Args:
         input_string (str): The string to be converted to an integer.
 
     Returns:
-        int | None: The integer representation of the string, or None if
+        int | None: The integer representation of the cleaned string, or None if
                     the conversion is not possible.
 
     Example:
@@ -60,7 +104,11 @@ def string_to_integer(input_string: str) -> int | None:
         >>> string_to_integer("-45")
         -45
         >>> string_to_integer("123.45")
-        None
+        123
+        >>> string_to_integer("abc123def")
+        123
+        >>> string_to_integer("12 34")
+        1234
         >>> string_to_integer("abc")
         None
         >>> string_to_integer(None)
@@ -70,31 +118,41 @@ def string_to_integer(input_string: str) -> int | None:
         # We return None because the function specifically handles string conversion.
         # Non-string types cannot be directly converted this way.
         return None
+    
+    # Clean the string by removing all characters except digits, '-', and '+'
+    cleaned_string = re.sub(r'[^0-9\-+]', '', input_string)
+    
+    if not cleaned_string:
+        return None
+    
     try:
-        # Attempt to convert the string to an integer.
+        # Attempt to convert the cleaned string to an integer.
         # Python's built-in int() function is efficient and handles leading/trailing
         # whitespace and positive/negative signs automatically.
-        return int(input_string)
+        return int(cleaned_string)
     except ValueError:
-        # Catch ValueError if the string cannot be parsed as an integer.
-        # This handles cases like "123a" or "hello".
+        # Catch ValueError if the cleaned string cannot be parsed as an integer.
+        # This handles cases like multiple signs or invalid formats.
         return None
 
-    # Cost: O(N) where N is the number of digits in the string, due to string parsing.
+    # Cost: O(N) where N is the length of the input string, due to regex and string parsing.
 
 
 def string_to_float(input_string: str) -> float | None:
     """Converts a string to a float, returning None if conversion fails.
 
     This function attempts to convert the given `input_string` into a floating-point number.
-    It returns `None` if the string cannot be safely converted (e.g., if it
-    contains non-numeric characters that prevent float parsing).
+    It first normalizes the decimal separator by replacing commas with dots if a comma
+    is present and no dot is found (assuming comma is used as decimal separator).
+    Then, it cleans the string by removing all non-numeric characters except
+    digits, '-', '+', and '.'. It returns `None` if the cleaned string cannot be
+    safely converted to a float.
 
     Args:
         input_string (str): The string to be converted to a float.
 
     Returns:
-        float | None: The float representation of the string, or None if
+        float | None: The float representation of the cleaned string, or None if
                       the conversion is not possible.
 
     Example:
@@ -104,6 +162,12 @@ def string_to_float(input_string: str) -> float | None:
         -0.75
         >>> string_to_float("100")
         100.0
+        >>> string_to_float("123,45")
+        123.45
+        >>> string_to_float("abc123.45def")
+        123.45
+        >>> string_to_float("12 34.56")
+        1234.56
         >>> string_to_float("abc")
         None
         >>> string_to_float(None)
@@ -112,24 +176,37 @@ def string_to_float(input_string: str) -> float | None:
     if not isinstance(input_string, str):
         # We return None for non-string inputs, as this function is for string conversion.
         return None
+    
+    # Normalize decimal separator: if comma is present and no dot, assume comma is decimal
+    if ',' in input_string and '.' not in input_string:
+        input_string = input_string.replace(',', '.')
+    
+    # Clean the string by removing all characters except digits, '-', '+', and '.'
+    cleaned_string = re.sub(r'[^0-9\-+\.]', '', input_string)
+    
+    if not cleaned_string:
+        return None
+    
     try:
-        # Attempt to convert the string to a float.
+        # Attempt to convert the cleaned string to a float.
         # Python's built-in float() function handles various valid float formats,
         # including scientific notation and leading/trailing whitespace.
-        return float(input_string)
+        return float(cleaned_string)
     except ValueError:
-        # Catch ValueError if the string cannot be parsed as a float.
-        # This covers cases like "1.2.3" or "hello".
+        # Catch ValueError if the cleaned string cannot be parsed as a float.
+        # This covers cases like multiple dots or invalid formats.
         return None
 
-    # Cost: O(N) where N is the number of characters in the string, due to string parsing.
+    # Cost: O(N) where N is the number of characters in the string, due to regex and string parsing.
 
 
 def string_to_number(input_string: str, target_type: str = 'string') -> int | float | None:
     """Converts a string to an integer or float based on the specified target type.
 
     This function acts as a dispatcher, calling `string_to_integer` or
-    `string_to_float` based on the `target_type` argument. If the `target_type`
+    `string_to_float` based on the `target_type` argument. The underlying functions
+    clean the input string by removing non-numeric characters and handle decimal
+    separators (replacing commas with dots when appropriate). If the `target_type`
     is not 'integer' or 'float', it returns `None`. It also returns `None`
     if the conversion to the specified type fails.
 
@@ -147,10 +224,14 @@ def string_to_number(input_string: str, target_type: str = 'string') -> int | fl
         123
         >>> string_to_number("123.45", "float")
         123.45
+        >>> string_to_number("123,45", "float")
+        123.45
+        >>> string_to_number("abc123def", "integer")
+        123
+        >>> string_to_number("12 34.56", "float")
+        1234.56
         >>> string_to_number("abc", "integer")
         None
-        >>> string_to_number("100", "float")
-        100.0
         >>> string_to_number("not_a_number", "unknown_type")
         None
         >>> string_to_number(None, "integer")

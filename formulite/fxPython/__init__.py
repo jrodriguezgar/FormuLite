@@ -1,6 +1,3 @@
 """
-Formulite - fxPython: Useful python functions
+fxPython - Python utilities and conversions
 """
-
-__version__ = "0.0.1"
-

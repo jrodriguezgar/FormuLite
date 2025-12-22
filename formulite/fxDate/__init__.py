@@ -1,6 +1,3 @@
 """
-Formulite - fxDate: Useful date functions 
+fxDate - Date manipulation and formatting utilities
 """
-
-__version__ = "0.0.1"
-

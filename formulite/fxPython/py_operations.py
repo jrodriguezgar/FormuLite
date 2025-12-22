@@ -8,6 +8,8 @@ from typing import Union, Tuple
 
 import operator
 
+import re
+
 
 def merge_json_strings(json_str_1: str, json_str_2: str) -> str:
     """Merges two JSON strings (representing JSON objects) into a new JSON string.
@@ -416,6 +418,97 @@ def filter_elements_by_another(
     elif return_type == "set":
         # Converting to a set will automatically handle uniqueness
         return set(filtered_elements_list)
+
+
+def merge_elements(
+    first_collection: Iterable,
+    second_collection: Iterable,
+    return_type: str = "list",
+    remove_duplicates: bool = False
+) -> Union[list, tuple, set]:
+    """Merges two collections into a single collection of the specified type.
+
+    This function is highly flexible, accepting lists, tuples, or sets as input for both
+    collections. It combines all elements from both collections and returns them in the
+    specified output type (list, tuple, or set).
+
+    Args:
+        first_collection (Iterable): The first collection (list, tuple, or set) to merge.
+        second_collection (Iterable): The second collection (list, tuple, or set) to merge.
+        return_type (str, optional): The desired type of the returned collection.
+                                     Accepted values are "list", "tuple", or "set".
+                                     Defaults to "list".
+        remove_duplicates (bool, optional): If True, removes duplicate elements from the merged result.
+                                           Only applicable when return_type is "list" or "tuple".
+                                           Defaults to False.
+
+    Returns:
+        Union[list, tuple, set]: A new collection of the specified `return_type`
+                                 containing all elements from both input collections.
+
+    Raises:
+        TypeError: If `first_collection` or `second_collection` is not a recognized iterable type (list, tuple, set).
+        ValueError: If `return_type` is not one of "list", "tuple", or "set".
+
+    Example of use:
+        >>> list_a = [1, 2, 3]
+        >>> list_b = [4, 5, 6]
+        >>> merge_elements(list_a, list_b, return_type="list")
+        [1, 2, 3, 4, 5, 6]
+
+        >>> tuple_a = ("a", "b", "c")
+        >>> set_b = {"c", "d", "e"}
+        >>> merge_elements(tuple_a, set_b, return_type="tuple")
+        ('a', 'b', 'c', 'c', 'd', 'e')
+
+        >>> list_a = [1, 2, 2, 3]
+        >>> list_b = [3, 4, 4, 5]
+        >>> merge_elements(list_a, list_b, return_type="list", remove_duplicates=True)
+        [1, 2, 3, 4, 5]
+
+        >>> set_a = {1, 2, 3}
+        >>> set_b = {3, 4, 5}
+        >>> merge_elements(set_a, set_b, return_type="set")
+        {1, 2, 3, 4, 5}
+
+    Cost:
+        O(n + m) where n and m are the lengths of the input collections.
+        If remove_duplicates is True and return_type is not "set", the cost becomes
+        O(n + m) for creating a set and then converting back.
+    """
+    # Input type validation for first_collection and second_collection
+    valid_input_types = (list, tuple, set)
+    if not isinstance(first_collection, valid_input_types):
+        raise TypeError(f"'first_collection' must be a list, tuple, or set, not {type(first_collection).__name__}.")
+    if not isinstance(second_collection, valid_input_types):
+        raise TypeError(f"'second_collection' must be a list, tuple, or set, not {type(second_collection).__name__}.")
+
+    # Validate the requested return_type
+    valid_return_types = {"list", "tuple", "set"}
+    if return_type not in valid_return_types:
+        raise ValueError(f"Invalid 'return_type'. Expected one of {', '.join(valid_return_types)}, got '{return_type}'.")
+
+    # Merge the collections by converting both to lists and concatenating them.
+    # This approach preserves order and handles all iterable types uniformly.
+    # Cost: O(n + m) where n and m are the lengths of the collections.
+    merged_list = list(first_collection) + list(second_collection)
+
+    # Handle duplicate removal if requested
+    if remove_duplicates and return_type != "set":
+        # Convert to set to remove duplicates, then back to list.
+        # Note: This may not preserve the original order in Python < 3.7,
+        # but in Python 3.7+ dictionaries maintain insertion order, and
+        # dict.fromkeys() can be used to preserve order while removing duplicates.
+        merged_list = list(dict.fromkeys(merged_list))
+
+    # Convert the merged list to the specified return_type
+    if return_type == "list":
+        return merged_list
+    elif return_type == "tuple":
+        return tuple(merged_list)
+    elif return_type == "set":
+        # Converting to a set will automatically handle uniqueness
+        return set(merged_list)
     
 
 def pick_in_collection(
@@ -850,3 +943,112 @@ def execute_os_command(command: Union[str, list[str]]) -> Tuple[int, str, str]:
     except Exception as e:
         # Catch other potential errors during process execution (e.g., permissions)
         return 1, "", f"An unexpected error occurred: {e}"
+    
+
+def calculate(expression_string):
+    """
+    Evaluates a compound arithmetic expression from a string.
+
+    This function safely evaluates a string containing a mathematical expression,
+    respecting the standard order of operations (PEMDAS/BODMAS). It also
+    handles implicit multiplication, e.g., converting '3(4+2)' to '3*(4+2)'.
+
+    The cost of this function depends on the complexity of the expression
+    but is generally efficient for common arithmetic.
+
+    Args:
+        expression_string (str): The mathematical expression to be evaluated.
+
+    Returns:
+        (int | float): The numerical result of the expression.
+
+    Raises:
+        ValueError: If the expression string is syntactically incorrect,
+                    attempts a division by zero, or contains invalid characters.
+
+    Example of use:
+        result1 = evaluate_compound_expression("3 + 4 * 5")
+        # result1 will be 23
+
+        result2 = evaluate_compound_expression("2 * 3(6 / 2) - 9 + 6")
+        # result2 will be 15.0
+    """
+
+    # Why: The standard eval() does not understand implicit multiplication (e.g., '3(4)').
+    # This regular expression finds a number or a closing parenthesis followed by
+    # an opening parenthesis and inserts a '*' to make it explicit.
+    processed_string = re.sub(r'(?<=[0-9\)])\s*\(', '*(', expression_string)
+
+    # Why: Using a try-except block to catch common math or syntax errors
+    # from eval() and present them to the user in a controlled way.
+    try:
+        # Why: eval() is powerful but dangerous if used with untrusted input.
+        # We restrict its scope by providing empty dictionaries for globals and locals,
+        # which prevents it from accessing system functions or variables.
+        # The {"__builtins__": {}} part is the key security measure.
+        allowed_globals = {"__builtins__": {}}
+        allowed_locals = {}
+        
+        result = eval(processed_string, allowed_globals, allowed_locals)
+        return result
+
+    except (SyntaxError, ZeroDivisionError, NameError, TypeError) as e:
+        # Why: Raise a single, clear error type to the user, embedding the
+        # original error message for better debugging.
+        raise ValueError(f"Invalid or malformed expression provided: {e}")
+
+
+from collections.abc import Iterable
+from typing import Any, Optional
+
+def search(collection: Iterable[Any], target_element: Any) -> Optional[Any]:
+    """
+    Searches for a target element within an iterable collection.
+
+    This function iterates through the provided collection to find the first
+    occurrence of the `target_element`. It is designed to work with any
+    iterable, such as lists, tuples, sets, and generators.
+
+    Args:
+        collection (Iterable[Any]): The collection to be searched.
+        target_element (Any): The element to search for.
+
+    Returns:
+        Optional[Any]: The found element, or `None` if the element is not found.
+        The return type is `Optional[Any]` to clearly indicate that the function
+        might not return an element.
+
+    Raises:
+        TypeError: If the provided `collection` is not an iterable.
+
+    Example of use:
+        >>> my_list = [1, 2, 3, 4, 5]
+        >>> search(my_list, 3)
+        3
+        >>> search(my_list, 6)
+        None
+
+    Cost:
+        The time complexity is O(N) in the worst-case scenario, where N is the
+        number of elements in the collection, as it may need to check every
+        element. In the best case, it is O(1) if the element is the first in
+        the collection. The space complexity is O(1) as no extra storage is
+        needed.
+    """
+    if not isinstance(collection, Iterable):
+        # We raise a TypeError because the function requires an iterable
+        # to operate correctly. This helps in early error detection.
+        raise TypeError("The 'collection' argument must be an iterable.")
+
+    for element in collection:
+        if element == target_element:
+            return element
+            # The loop terminates immediately upon finding the element,
+            # which is an efficient way to handle the search.
+
+    # If the loop completes without finding the element, we return None
+    # to signal that the search was unsuccessful.
+    return None
+
+
+
