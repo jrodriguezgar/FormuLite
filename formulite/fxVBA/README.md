@@ -3716,15 +3716,3 @@ print(UCaseS("hola"))  # 'HOLA'
 
 ---
 
-## Credits
-
-**FormuLite - VBA/Access Compatible Functions Module**
-
-Este módulo proporciona una implementación en Python de las funciones VBA/Access más utilizadas, manteniendo la compatibilidad de sintaxis y comportamiento con el entorno original de Microsoft Access y Visual Basic for Applications.
-
-**Desarrollado por:** DatamanEdge  
-**Licencia:** MIT  
-**Versión:** 1.0.0
-
----
-

@@ -2757,16 +2757,3 @@ db(cost=10000, salvage=1000, life=5, period=1)  # 3333.333333333333
 **Cost:** O(1)
 
 ---
-
-## Summary
-
-The **fxNumeric** module provides **145 functions** across 6 categories:
-
-- **Arithmetic Operations**: 8 functions (logarithms, powers, roots)
-- **Numeric Conversions**: 24 functions (type conversions, base conversions, timestamps)
-- **Numeric Operations**: 31 functions (rounding, formatting, comparisons, primes)
-- **Statistical Functions**: 13 functions (mean, median, variance, correlation, percentiles)
-- **Trigonometric Functions**: 41 functions (basic trig, hyperbolic, inverse functions)
-- **Financial Functions**: 8 functions (FV, PV, PMT, NPV, IRR, depreciation)
-
-All functions follow Python best practices with type hints, comprehensive documentation, and error handling.

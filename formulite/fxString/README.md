@@ -14,6 +14,13 @@ The fxString module provides comprehensive string manipulation functions for For
 - **Validations**: Check patterns and content
 - **Spellcheck**: Text normalization
 
+### 📚 Additional Resources
+
+- **Practical Use Cases** - Real-world examples and patterns for string similarity, spellcheck, autocompletion, and more
+  - **[English Version (USE_CASES_EN.md)](USE_CASES_EN.md)** 
+  - **[Spanish Version (USE_CASES.md)](USE_CASES.md)**
+- **[Spanish Functions Guide](README_string_spanish.md)** - Specialized guide for Spanish language processing (DNI/NIE/CIF validation, phonetic reduction)
+
 ## Module Structure
 
 - **string_convertions.py**: Functions for converting strings to other data types
@@ -29,6 +36,7 @@ The fxString module provides comprehensive string manipulation functions for For
 
 ## Table of Contents
 
+- [Additional Resources](#-additional-resources)
 - [Function Categories](#function-categories)
   - [String Conversions](#string-conversions)
   - [String Operations](#string-operations)
@@ -39,7 +47,6 @@ The fxString module provides comprehensive string manipulation functions for For
   - [String Validations](#string-validations)
   - [String Spellcheck](#string-spellcheck)
 - [Function Index](#function-index)
-- [Credits](#credits)
 
 ---
 
@@ -1445,6 +1452,26 @@ Normalizes symbol spacing in a string according to typographical rules.
 
 ---
 
+### normalize_text
+
+Normalizes text for spell checking by converting to lowercase and removing accents.
+
+**Args:**
+- `text` (str): The text to normalize
+
+**Returns:**
+- str: The normalized, lowercase ASCII string.
+
+**Usage Example:**
+```python
+>>> normalize_text("Julián")
+'julian'
+```
+
+**Cost:** O(n), where n is the length of the text
+
+---
+
 ### flat_vowels
 
 Removes diacritical marks (accents) from vowels in a string.
@@ -2110,6 +2137,150 @@ Calculates multiple similarity scores between two strings using all available al
 
 ---
 
+### Guía de Umbrales de Similitud
+
+Los algoritmos de similitud retornan valores entre 0.0 (completamente diferentes) y 1.0 (idénticos). La elección del umbral correcto depende del caso de uso:
+
+#### Umbrales Recomendados por Caso de Uso
+
+**Validación Estricta (0.90 - 1.00)**
+- Detección de duplicados exactos
+- Verificación de identidad
+- Control de calidad de datos críticos
+- Ejemplo: Verificar si dos DNI son el mismo
+```python
+# Umbral: 0.95
+if calculate_similarity(dni1, dni2, 'levenshtein') >= 0.95:
+    print("Posible duplicado - revisión manual requerida")
+```
+
+**Nombres Propios (0.85 - 0.90)**
+- Comparación de nombres de personas
+- Búsqueda de clientes
+- Matching de registros
+- Ejemplo: Encontrar un cliente por nombre
+```python
+# Umbral: 0.85 con jaro_winkler (favorece coincidencias al inicio)
+similarity = calculate_similarity(busqueda, nombre_cliente, 'jaro_winkler')
+if similarity['score'] >= 0.85:
+    resultados.append(nombre_cliente)
+```
+
+**Búsqueda Tolerante (0.70 - 0.80)**
+- Autocompletado
+- Sugerencias de búsqueda
+- Corrección ortográfica
+- Búsqueda en catálogos
+- Ejemplo: Sistema de autocompletado
+```python
+# Umbral: 0.70
+sugerencias = [
+    item for item in catalogo
+    if calculate_similarity(query, item, 'levenshtein') >= 0.70
+]
+```
+
+**Similitud Semántica (0.50 - 0.70)**
+- Comparación de textos
+- Detección de contenido similar
+- Agrupación de documentos
+- Ejemplo: Detectar artículos similares
+```python
+# Umbral: 0.60 con sorensen_dice (bueno para textos)
+if calculate_similarity(texto1, texto2, 'sorensen_dice')['score'] >= 0.60:
+    print("Contenido similar detectado")
+```
+
+**Filtrado Inicial (0.40 - 0.50)**
+- Pre-filtrado en datasets grandes
+- Primera pasada en búsquedas complejas
+- Ejemplo: Filtro rápido antes de análisis detallado
+```python
+# Umbral: 0.45 con metaphone (rápido, fonético)
+candidatos = [
+    item for item in dataset_grande
+    if calculate_similarity(query, item, 'metaphone')  # True/False
+]
+# Luego aplicar algoritmo más preciso a candidatos
+```
+
+#### Umbrales por Algoritmo
+
+**Levenshtein (Distancia de Edición)**
+- Estricto: ≥ 0.90
+- Moderado: ≥ 0.75
+- Tolerante: ≥ 0.60
+- Mejor para: Errores tipográficos, texto general
+
+**Jaro-Winkler (Favorece Prefijos)**
+- Estricto: ≥ 0.92
+- Moderado: ≥ 0.85
+- Tolerante: ≥ 0.75
+- Mejor para: Nombres propios, palabras cortas
+
+**Metaphone (Fonético)**
+- Solo retorna True/False
+- Mejor para: Filtrado rápido, palabras que suenan igual
+
+**Sorensen-Dice / Jaccard (Tokens)**
+- Estricto: ≥ 0.80
+- Moderado: ≥ 0.60
+- Tolerante: ≥ 0.40
+- Mejor para: Frases, documentos, textos largos
+
+#### Estrategia Multi-Umbral
+
+Para casos críticos, combina múltiples algoritmos con diferentes umbrales:
+
+```python
+def validacion_robusta(palabra1, palabra2):
+    """Validación usando múltiples algoritmos con umbrales específicos."""
+    
+    # Levenshtein: errores tipográficos (umbral: 0.85)
+    lev_score = calculate_similarity(palabra1, palabra2, 'levenshtein')
+    
+    # Jaro-Winkler: similitud de nombres (umbral: 0.90)
+    jw_result = calculate_similarity(palabra1, palabra2, 'jaro_winkler')
+    
+    # Metaphone: similitud fonética (True/False)
+    metaphone_match = calculate_similarity(palabra1, palabra2, 'metaphone')
+    
+    # Decisión combinada
+    es_similar = (
+        lev_score >= 0.85 and
+        jw_result['score'] >= 0.90 and
+        metaphone_match
+    )
+    
+    return es_similar
+```
+
+#### Ajuste de Umbrales
+
+Factores a considerar al ajustar umbrales:
+
+1. **Longitud de cadenas**: Cadenas más largas toleran umbrales más bajos
+2. **Criticidad del dato**: Datos críticos requieren umbrales más altos
+3. **Volumen de datos**: Datasets grandes pueden necesitar umbrales más altos para reducir falsos positivos
+4. **Tipo de errores esperados**: Errores tipográficos vs. variaciones fonéticas
+5. **Consecuencias de errores**: Balance entre falsos positivos y falsos negativos
+
+**Ejemplo de ajuste dinámico:**
+```python
+def calcular_umbral_dinamico(longitud_texto):
+    """Ajusta el umbral según la longitud del texto."""
+    if longitud_texto < 5:
+        return 0.90  # Palabras cortas: muy estricto
+    elif longitud_texto < 15:
+        return 0.85  # Palabras medias: estricto
+    elif longitud_texto < 50:
+        return 0.75  # Frases cortas: moderado
+    else:
+        return 0.65  # Textos largos: tolerante
+```
+
+---
+
 ## String Spanish
 
 Functions specific to Spanish language processing and validation.
@@ -2386,37 +2557,8 @@ False
 
 Functions for spell checking and text normalization.
 
-### normalize_text
+### UniversalSpellChecker
 
-Normalizes text for spell checking by converting to lowercase and removing accents.
-
-**Args:**
-- `text` (str): The text to normalize
-
-**Returns:**
-- str: The normalized text
-
-**Usage Example:**
-```python
->>> normalize_text("Héllo Wörld")
-'hello world'
-```
-
-**Cost:** O(n), where n is the length of the text
+Class for multi-algorithm spell checking.
 
 ---
-
-## Summary
-
-The fxString module provides a comprehensive suite of over 150 functions for:
-
-- **String Conversions (11 functions)**: Type conversions, date parsing, JSON extraction
-- **String Operations (60+ functions)**: Manipulation, extraction, substring operations
-- **String Format (25+ functions)**: Formatting, normalization, capitalization
-- **String Evaluations (25+ functions)**: Validation, pattern checking, email/URL parsing
-- **String Similarity (20+ functions)**: Comparison algorithms, similarity scores
-- **String Spanish (10+ functions)**: Spanish-specific validation and processing
-- **String Validations (2 functions)**: Character presence and anagram checking
-- **String Spellcheck (2+ functions)**: Text normalization for spell checking
-
-All functions follow Python best practices (PEP standards), include comprehensive documentation with complexity analysis, and handle edge cases gracefully.

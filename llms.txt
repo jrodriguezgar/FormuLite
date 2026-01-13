@@ -298,6 +298,7 @@
 - `ascii_string(text)` - Convert to ASCII, remove non-ASCII
 - `format_email_address(email)` - Normalize email (lowercase, trim)
 - `format_url(url)` - Normalize URL
+- `normalize_text(text)` - Lowercase and remove accents for processing
 - `format_name(name, mode='title')` - Format person name
 - `format_fullname(fullname)` - Format full name, remove titles
 - `format_company_name(name)` - Format company, handle legal forms
@@ -346,7 +347,8 @@
 - `same_letters(s1, s2)` - Exact same characters (anagram)
 
 ### string_spellcheck.py
-- `normalize_text(text)` - Lowercase and remove accents
+- `UniversalSpellChecker` - Class for multi-algorithm spell checking
+- `UniversalSpellChecker.correct(raw_word)` - Correct word using SymSpell/RapidFuzz
 
 ---
 

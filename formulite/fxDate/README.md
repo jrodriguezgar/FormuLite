@@ -2848,10 +2848,3 @@ unix_timestamp_to_datetime(1718092025.0, tz_info='UTC')
 **Cost:** O(1)
 
 ---
-
-## Credits
-
-FormuLite - fxDate Module
-Developed by DatamanEdge
-
-For more information, see the project's [main README](../README.md).

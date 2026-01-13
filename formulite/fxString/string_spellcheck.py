@@ -1,173 +1,134 @@
-import unicodedata
-from typing import List, Optional
 from collections import Counter
+from typing import List, Optional, Dict
 
+from rapidfuzz import process
 from spellchecker import SpellChecker
 from symspellpy import SymSpell, Verbosity
-from rapidfuzz import process
+
+from .string_format import normalize_text
 
 # Constants
 DEFAULT_EDIT_DISTANCE = 2
 PREFIX_LENGTH = 7
-
-
-def normalize_text(text: str) -> str:
-    """
-    Normalizes text by removing accents and converting to lowercase.
-
-    This function strips diacritical marks (e.g., 'á' becomes 'a') to ensure
-    consistent comparison keys for spellchecking algorithms.
-
-    Args:
-        text (str): The input string to normalize.
-
-    Returns:
-        str: The normalized, lowercase ASCII string.
-
-    Example:
-        >>> normalize_text("Julián")
-        'julian'
-
-    Complexity:
-        O(N) where N is the length of the string.
-    """
-    # Normalize unicode characters to NFD form
-    normalized = unicodedata.normalize('NFD', text)
-
-    # Filter out non-spacing mark characters and encode to ASCII
-    return "".join(
-        char for char in normalized if unicodedata.category(char) != 'Mn'
-    ).lower()
+FUZZY_SCORE_THRESHOLD = 85
+DEFAULT_WORD_FREQUENCY = 100
 
 
 class UniversalSpellChecker:
+    """
+    Multi-purpose spell checker engine that integrates SymSpell and RapidFuzz.
+    """
 
     def __init__(self, language: str = "es", custom_vocabulary: Optional[List[str]] = None):
         """
-        Initializes the multi-purpose spell checker engine.
-
-        This engine integrates SymSpell (for speed), SpellChecker (for generic language),
-        and RapidFuzz (for fuzzy matching) to provide a robust correction suggestion.
+        Initializes the UniversalSpellChecker.
 
         Args:
-            language (str): The language code (e.g., 'es', 'en') for the generic dictionary.
-            custom_vocabulary (list, optional): A list of specific words (e.g., names)
-                                                to prioritize over the generic dictionary.
-
-        Returns:
-            None
-
-        Raises:
-            ValueError: If the language is not supported by pyspellchecker.
-
-        Example:
-            >>> checker = UniversalSpellChecker(language="es", custom_vocabulary=["Juan", "María"])
+            language (str): The language code (e.g., 'es', 'en').
+            custom_vocabulary (list, optional): Specific words to prioritize.
         """
-        # Initialize the generic spell checker
         self.spell_checker = SpellChecker(language=language)
 
-        # Initialize SymSpell
-        # We use a generic frequency count because we often lack real frequency data for custom lists
-        self.sym_spell = SymSpell(max_dictionary_edit_distance=DEFAULT_EDIT_DISTANCE, prefix_length=PREFIX_LENGTH)
-        
-        # Define the vocabulary source
-        # If custom vocabulary is provided, we use it as the primary source.
-        # Otherwise, we extract the dictionary from the generic SpellChecker instance.
-        self.vocabulary = custom_vocabulary if custom_vocabulary else list(self.spell_checker.word_frequency.words.keys())
+        self.sym_spell = SymSpell(
+            max_dictionary_edit_distance=DEFAULT_EDIT_DISTANCE,
+            prefix_length=PREFIX_LENGTH
+        )
 
-        # Load vocabulary into SymSpell in memory (avoiding disk I/O)
-        self._load_symspell_memory(self.vocabulary)
+        # Determine vocabulary source
+        if custom_vocabulary:
+            self.vocabulary = custom_vocabulary
+        else:
+            # Use keys from the generic dictionary
+            self.vocabulary = list(self.spell_checker.word_frequency.words.keys())
 
-    def _load_symspell_memory(self, word_list: List[str]) -> None:
-        """
-        Loads a list of words into the SymSpell engine in memory.
+        # Map normalized -> original for casing restoration
+        self._normalized_map: Dict[str, str] = {}
 
-        Direct memory loading is significantly faster than writing/reading a temporary text file.
+        self._load_dictionary()
 
-        Args:
-            word_list (list): The list of valid words/names.
-
-        Returns:
-            None
-
-        Complexity:
-            O(N) where N is the number of words in the list.
-        """
-        for word in word_list:
-            # We sanitize the key for lookup but keep the term as is
+    def _load_dictionary(self) -> None:
+        """Loads the vocabulary into SymSpell and creates the normalization map."""
+        for word in self.vocabulary:
             clean_key = normalize_text(word)
-            
-            # We assign an arbitrary high frequency (100) to ensure these words are prioritized
-            self.sym_spell.create_dictionary_entry(clean_key, 100)
+            self._normalized_map[clean_key] = word
+
+            # Load into SymSpell with high priority
+            self.sym_spell.create_dictionary_entry(clean_key, DEFAULT_WORD_FREQUENCY)
 
     def correct(self, raw_word: str) -> str:
         """
-        Corrects the input word using a weighted voting mechanism.
+        Corrects the input word using weighted voting (SymSpell + RapidFuzz).
 
-        It aggregates results from SymSpell and RapidFuzz to determine the most
-        likely correction. It prioritizes exact matches and low edit distances.
+        Aggregates results from SymSpell and RapidFuzz to determine the most
+        likely correction. Prioritizes exact matches and low edit distances.
 
         Args:
             raw_word (str): The potentially misspelled word.
 
         Returns:
-            str: The best corrected word found, or the original word if no match is found.
-
-        Example:
-            >>> checker.correct("Juaan")
-            'Juan'
-
-        Complexity:
-            O(K * M) where K is the vocabulary size and M is the word length (due to Fuzzy matching).
+            str: The best correction found with original casing from vocabulary.
         """
-        # Normalize input for consistent looking up
+        if not raw_word:
+            return ""
+
         clean_input = normalize_text(raw_word)
-        
-        # 1. SymSpell Lookup (Fastest, strict edit distance)
-        # We look for the closest match within the edit distance
-        sym_suggestions = self.sym_spell.lookup(
-            clean_input, 
-            Verbosity.CLOSEST, 
+
+        # Optimization: Check if the normalized input is already valid
+        if clean_input in self._normalized_map:
+            return self._normalized_map[clean_input]
+
+        # 1. SymSpell Lookup
+        sym_suggestion = self._get_symspell_suggestion(clean_input)
+
+        # 2. RapidFuzz Lookup
+        fuzz_suggestion = self._get_fuzzy_suggestion(clean_input)
+
+        # 3. Decision Logic
+        return self._decide_best_match(raw_word, sym_suggestion, fuzz_suggestion)
+
+    def _get_symspell_suggestion(self, clean_input: str) -> Optional[str]:
+        """Runs SymSpell lookup and maps back to original casing."""
+        suggestions = self.sym_spell.lookup(
+            clean_input,
+            Verbosity.CLOSEST,
             max_edit_distance=DEFAULT_EDIT_DISTANCE
         )
-        
-        # If SymSpell finds an exact match (distance 0), return immediately for efficiency
-        if sym_suggestions and sym_suggestions[0].distance == 0:
-            # We must retrieve the original casing from our vocabulary logic if needed, 
-            # but SymSpell returns the stored term.
-            return raw_word
 
-        result_symspell = sym_suggestions[0].term if sym_suggestions else None
+        if suggestions:
+            # SymSpell returns normalized key. Map back to original.
+            normalized_term = suggestions[0].term
+            return self._normalized_map.get(normalized_term, normalized_term)
 
-        # 2. RapidFuzz Lookup (Slower, but handles phonetic/visual similarity better)
-        # We extract the single best match from the vocabulary
-        fuzz_match = process.extractOne(
-            clean_input, 
-            self.vocabulary, 
+        return None
+
+    def _get_fuzzy_suggestion(self, clean_input: str) -> Optional[str]:
+        """Runs RapidFuzz lookup returning original casing."""
+        # process.extractOne returns (match, score, index)
+        match_result = process.extractOne(
+            clean_input,
+            self.vocabulary,
             processor=normalize_text
         )
-        
-        # Unpack fuzzy result: (match, score, index)
-        # We require a score > 85 to consider it a valid correction
-        result_fuzz = fuzz_match[0] if fuzz_match and fuzz_match[1] >= 85 else None
 
-        # 3. Decision Logic (Voting)
-        # If both engines failed, return original
-        if not result_symspell and not result_fuzz:
+        if match_result and match_result[1] >= FUZZY_SCORE_THRESHOLD:
+            return match_result[0]
+
+        return None
+
+    def _decide_best_match(self, raw_word: str, sym_match: Optional[str], fuzz_match: Optional[str]) -> str:
+        """Determines the winner between algorithms."""
+        if not sym_match and not fuzz_match:
             return raw_word
 
-        # Collect valid results
         candidates = []
-        if result_symspell:
-            candidates.append(result_symspell)
-        if result_fuzz:
-            candidates.append(result_fuzz)
-            
-        # Find the most common suggestion
-        # If there is a tie or only one result, Counter handles it gracefully
+        if sym_match:
+            candidates.append(sym_match)
+        if fuzz_match:
+            candidates.append(fuzz_match)
+
+        # If both exist and are different, this logic favors the most common one.
+        # Since there are max 2 items, if they differ, Counter picks the first one encountered (SymSpell).
+        # This implies SymSpell > RapidFuzz in priority (Edit Distance > Loose shape).
         most_common = Counter(candidates).most_common(1)[0][0]
-        
-        # Attempt to restore the original casing from the vocabulary if possible
-        # (Simple restoration logic, can be expanded based on specific needs)
-        return most_common.title() if raw_word[0].isupper() else most_common
-    
+
+        return most_common

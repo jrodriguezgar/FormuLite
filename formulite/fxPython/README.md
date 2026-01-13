@@ -2900,15 +2900,3 @@ Evaluates expression against values and returns matching result.
 **Cost:** O(n) where n is the number of value-result pairs
 
 ---
-
-## Summary
-
-The fxPython module provides a comprehensive set of utilities for Python programming:
-
-- **27 conversion functions** for seamless type transformations
-- **24 operation functions** for advanced collection manipulation (including 6 SQL-style aggregate functions)
-- **12 logical functions** for conditional logic and type checking
-- **8 tool functions** for high-level programming patterns
-- **60+ itertools recipes** for efficient iterator processing
-
-All functions are optimized with documented complexity analysis and follow Python best practices (PEP standards).

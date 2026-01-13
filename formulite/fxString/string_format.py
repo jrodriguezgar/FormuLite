@@ -48,6 +48,35 @@ _RE_NUMBERS_AND_DOTS = re.compile(r'[0-9.]')
 
 # Pre-compiled patterns for format_email_address and format_url
 _RE_EMAIL_VALID_CHARS = re.compile(r'[^a-zA-Z0-9.!#$%&\'*+/=?^_`{|}~@-]')
+
+
+def normalize_text(text: str) -> str:
+    """
+    Normalizes text by removing accents and converting to lowercase.
+
+    This function strips diacritical marks (e.g., 'á' becomes 'a') to ensure
+    consistent comparison keys for spellchecking algorithms.
+
+    Args:
+        text (str): The input string to normalize.
+
+    Returns:
+        str: The normalized, lowercase ASCII string.
+
+    Example:
+        >>> normalize_text("Julián")
+        'julian'
+    """
+    if not text:
+        return ""
+
+    # Normalize unicode characters to NFD form
+    normalized = unicodedata.normalize('NFD', text)
+
+    # Filter out non-spacing mark characters and encode to ASCII
+    return "".join(
+        char for char in normalized if unicodedata.category(char) != 'Mn'
+    ).lower()
 _RE_URL_VALID_CHARS = re.compile(r'[^\w\-\.~:/?#\[\]@!$&\'()*+,;=%\s]')
 
 # Pre-compiled patterns for format_internet_domain

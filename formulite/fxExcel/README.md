@@ -890,12 +890,6 @@ The `fxExcel` module provides Excel-compatible functions for FormuLite. These fu
 
 ---
 
-## Credits
-
-This documentation was generated using the FormuLite framework. Function implementations are based on Excel's documented behavior and compatibility standards.
-
----
-
 ## Date Functions
 
 ### `DAYS()`
@@ -4886,9 +4880,3 @@ print(VALUE("123.45"))  # 123.45
 **Note:** This is a simplified implementation. Full Excel VALUE function handles dates, times, and regional formats.
 
 ---
-
-## Credits
-
-FormuLite - fxExcel Module
-Copyright (c) 2025 DatamanEdge
-
