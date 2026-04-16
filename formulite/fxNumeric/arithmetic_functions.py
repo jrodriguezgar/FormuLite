@@ -458,6 +458,11 @@ def factorial(n: int) -> int:
     if n < 0:
         raise ValueError("Factorial is not defined for negative numbers.")
 
+    if n > 170:
+        raise ValueError(
+            f"factorial argument {n} exceeds maximum supported (170)."
+        )
+
     return math.factorial(n)
 
 
@@ -1072,6 +1077,12 @@ def multinomial_coefficient(*args: int) -> int:
             raise ValueError(f"All arguments must be non-negative, got {k}.")
 
     n = sum(args)
+
+    if n > 170:
+        raise ValueError(
+            f"Sum of arguments ({n}) exceeds maximum factorial input (170)."
+        )
+
     result = math.factorial(n)
 
     for k in args:

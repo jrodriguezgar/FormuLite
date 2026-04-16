@@ -19,7 +19,6 @@ import json
 import sys
 from collections.abc import Callable, Hashable, Iterable, Sequence
 from typing import Any, List, Optional, Set, Tuple, Union
-import subprocess
 import re
 
 
@@ -861,99 +860,6 @@ def dictionary_rename_keys(original_dict: dict, key_mapping: dict) -> dict:
 
     return renamed_dict
 
-
-def execute_os_command(command: Union[str, list[str]]) -> Tuple[int, str, str]:
-    """
-    Executes a command in the underlying operating system and captures its output.
-
-    This function provides a secure and flexible way to interact with the shell
-    or directly execute programs. It uses `subprocess.Popen` for fine-grained control
-    and is generally preferred over `os.system` for security and functionality.
-
-    Args:
-        command (Union[str, list[str]]): The command to execute.
-            - If a string, it will be executed via the shell (e.g., 'ls -l', 'dir').
-              Be cautious with user-provided input when `shell=True` due to security risks.
-            - If a list of strings, it will be executed directly without a shell
-              (e.g., ['ls', '-l'], ['cmd.exe', '/c', 'dir']). This is safer for
-              commands constructed from untrusted input.
-
-    Returns:
-        Tuple[int, str, str]: A tuple containing:
-            - int: The return code of the command (0 typically indicates success).
-            - str: The standard output (stdout) of the command as a string.
-            - str: The standard error (stderr) of the command as a string.
-
-    Raises:
-        TypeError: If the 'command' argument is not a string or a list of strings.
-        subprocess.CalledProcessError: If the command returns a non-zero exit status
-                                      and `check=True` (though not used directly here,
-                                      it's good to be aware of this common subprocess error).
-        FileNotFoundError: If the command or executable specified is not found.
-        # Other subprocess-related exceptions can occur (e.g., PermissionError)
-
-    Example of use:
-        >>> # Example 1: Listing directory contents (shell=True for simplicity, but be careful!)
-        >>> return_code, stdout, stderr = execute_os_command("ls -l" if os.name == 'posix' else "dir")
-        >>> print(f"Return Code: {return_code}")
-        >>> print("STDOUT:")
-        >>> print(stdout)
-        >>> if stderr:
-        >>>     print("STDERR:")
-        >>>     print(stderr)
-
-        >>> # Example 2: Running a command without shell (safer for user input)
-        >>> # On Linux/macOS:
-        >>> # return_code, stdout, stderr = execute_os_command(["echo", "Hello from Python!"])
-        >>> # On Windows:
-        >>> # return_code, stdout, stderr = execute_os_command(["cmd.exe", "/c", "echo", "Hello from Python!"])
-        >>> # print(f"Return Code: {return_code}")
-        >>> # print("STDOUT:")
-        >>> # print(stdout)
-
-        >>> # Example 3: Command with an error
-        >>> # return_code, stdout, stderr = execute_os_command("nonexistent_command")
-        >>> # print(f"Return Code: {return_code}")
-        >>> # print("STDOUT:")
-        >>> # print(stdout)
-        >>> # print("STDERR:")
-        >>> # print(stderr)
-    """
-    if not isinstance(command, (str, list)):
-        raise TypeError("The 'command' argument must be a string or a list of strings.")
-    if isinstance(command, list) and not all(isinstance(item, str) for item in command):
-        raise TypeError("If 'command' is a list, all its elements must be strings.")
-
-    # Determine if shell should be used. Using shell=True for string commands is common
-    # but also carries security implications if 'command' originates from untrusted user input.
-    # For list commands, shell=False is the default and generally safer.
-    use_shell = isinstance(command, str)
-
-    try:
-        # subprocess.run is the high-level interface recommended for most cases.
-        # It runs the command, waits for it to complete, and then returns a CompletedProcess object.
-        # capture_output=True ensures stdout and stderr are captured.
-        # text=True decodes stdout/stderr as text using default encoding (or specified encoding).
-        # check=False means it will not raise an exception for non-zero exit codes;
-        #            instead, the return code is provided in the result.
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,  # Decode output as text (uses default encoding, e.g., UTF-8)
-            shell=use_shell,
-            check=False # Do not raise CalledProcessError for non-zero exit codes
-        )
-
-        return result.returncode, result.stdout.strip(), result.stderr.strip()
-
-    except FileNotFoundError:
-        # This occurs if the command itself (the executable) is not found in the system's PATH.
-        return 127, "", "Error: Command not found." # Common exit code for command not found
-
-    except Exception as e:
-        # Catch other potential errors during process execution (e.g., permissions)
-        return 1, "", f"An unexpected error occurred: {e}"
-    
 
 def calculate(expression_string):
     """Evaluates a compound arithmetic expression from a string.

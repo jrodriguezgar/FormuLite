@@ -42,47 +42,6 @@ class Test_AccessError:
             pass
 
 
-class Test_CallByName:
-    def test_exists(self):
-        assert hasattr(mod, "CallByName")
-
-    def test_doc0(self):
-        try:
-            mod.CallByName("hello", "upper", 4)
-        except EXC:
-            pass
-
-    def test_doc1(self):
-        try:
-            mod.CallByName([1, 2, 3], "__len__", 4)
-        except EXC:
-            pass
-
-    def test_var0(self):
-        try:
-            mod.CallByName(0, "hello", 0)
-        except EXC:
-            pass
-
-    def test_var1(self):
-        try:
-            mod.CallByName(1, "", 1)
-        except EXC:
-            pass
-
-    def test_var2(self):
-        try:
-            mod.CallByName(None, "hello", 0)
-        except EXC:
-            pass
-
-    def test_var3(self):
-        try:
-            mod.CallByName("", "", "")
-        except EXC:
-            pass
-
-
 class Test_CurrentUser:
     def test_exists(self):
         assert hasattr(mod, "CurrentUser")

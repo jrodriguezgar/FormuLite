@@ -74,7 +74,6 @@ The fxPython module provides comprehensive Python collection and utility functio
 - [dictionary_filter_by_keys](#dictionary_filter_by_keys) - Returns dictionary with only specified keys
 - [combine_dictionaries](#combine_dictionaries) - Performs union or intersection on two dictionaries
 - [dictionary_rename_keys](#dictionary_rename_keys) - Renames dictionary keys based on mapping
-- [execute_os_command](#execute_os_command) - Executes OS command and captures output
 - [calculate](#calculate) - Evaluates arithmetic expression from string
 - [search](#search) - Searches for target element in iterable collection
 - [collection_avg](#collection_avg) - Calculates the average of numeric values in a collection
@@ -234,9 +233,6 @@ The fxPython module provides comprehensive Python collection and utility functio
 - [dictionary_to_object](#dictionary_to_object) - Converts dictionary into an object with attributes
 - [dictionary_to_string](#dictionary_to_string) - Serializes dictionary into string with colons and semicolons
 - [dictionary_values_to_set](#dictionary_values_to_set) - Returns dictionary values as a set
-
-**E**
-- [execute_os_command](#execute_os_command) - Executes OS command and captures output
 
 **F**
 - [factor](#factor) - Returns prime factors of n
@@ -1357,34 +1353,6 @@ Creates a new dictionary with keys renamed according to the mapping. Keys not in
 
 ---
 
-### execute_os_command
-
-Executes a command in the underlying operating system and captures its output.
-
-**Description:**
-Provides a secure and flexible way to interact with the shell or directly execute programs.
-
-**Args:**
-- `command` (Union[str, list[str]]): The command to execute (string for shell, list for direct)
-
-**Returns:**
-- Tuple[int, str, str]: Return code, stdout, and stderr
-
-**Raises:**
-- TypeError: If the command argument is not a string or list of strings
-- FileNotFoundError: If the command or executable is not found
-
-**Usage Example:**
-```python
->>> return_code, stdout, stderr = execute_os_command("echo Hello")
->>> print(f"Return Code: {return_code}")
->>> print(f"Output: {stdout}")
-```
-
-**Cost:** Depends on the executed command
-
----
-
 ### calculate
 
 Evaluates a compound arithmetic expression from a string.
@@ -1828,6 +1796,8 @@ Modifies an iterable by shifting elements and optionally adding new elements fro
 ### apply_expression
 
 Applies a string expression to every item in an iterable and returns a list.
+
+> ⚠️ **Security**: Attribute access is restricted to built-in types (`str`, `int`, `float`, `bool`, `list`, `tuple`, `dict`, `set`). Private attributes (`_`-prefixed) are blocked.
 
 **Description:**
 Dynamically creates a lambda function from a string expression for data transformations.

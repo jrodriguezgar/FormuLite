@@ -436,7 +436,15 @@ def apply_expression(expression: str, iterable: Iterable[Any]) -> list[Any]:
         if isinstance(node, ast.IfExp):
             return _eval(node.body, x) if _eval(node.test, x) else _eval(node.orelse, x)
         if isinstance(node, ast.Attribute):
-            return getattr(_eval(node.value, x), node.attr)
+            obj = _eval(node.value, x)
+            attr = node.attr
+            if attr.startswith("_"):
+                raise SyntaxError(f"Access to private attribute '{attr}' is not allowed")
+            if not isinstance(obj, (str, int, float, bool, list, tuple, dict, set)):
+                raise SyntaxError(
+                    f"Attribute access on type '{type(obj).__name__}' is not allowed"
+                )
+            return getattr(obj, attr)
         if isinstance(node, ast.Call):
             func = _eval(node.func, x)
             if node.keywords:

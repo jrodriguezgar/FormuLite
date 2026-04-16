@@ -31,6 +31,29 @@ from formulite.fxNumeric.constants_functions import (
     PI, E, TAU, PHI, INF, NAN, SQRT2, SQRT3, LN2, LN10,
 )
 
+_MAX_FACTORIAL = 170  # math.factorial(171) overflows float
+
+
+def _safe_factorial(n: int) -> int:
+    """Factorial with input-size guard to prevent DoS.
+
+    Args:
+        n: Non-negative integer.
+
+    Returns:
+        int: n!
+
+    Raises:
+        ValueError: If *n* exceeds ``_MAX_FACTORIAL``.
+
+    Complexity: O(n)
+    """
+    if n > _MAX_FACTORIAL:
+        raise ValueError(
+            f"factorial argument {n} exceeds maximum ({_MAX_FACTORIAL})."
+        )
+    return math.factorial(n)
+
 
 # ── Allowed Functions ───────────────────────────────────────────────────────
 
@@ -72,7 +95,7 @@ _FUNCTIONS: dict[str, Any] = {
     "abs": abs,
     "fabs": math.fabs,
     # Combinatorics
-    "factorial": math.factorial,
+    "factorial": _safe_factorial,
     "comb": math.comb,
     "perm": math.perm,
     "gcd": math.gcd,

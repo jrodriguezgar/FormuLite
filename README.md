@@ -5,7 +5,7 @@
 [![PyPI downloads](https://img.shields.io/pypi/dm/formulite)](https://pypi.org/project/formulite/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Version](https://img.shields.io/badge/version-0.2.0-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.2.1-green.svg)](CHANGELOG.md)
 
 > _"Write less, do more."_
 > _"The deterministic toolset your AI agents can trust."_
@@ -226,6 +226,16 @@ pip install formulite[mcp-semantic]
 ```
 
 Configure your AI client (VS Code, Claude Desktop, Cursor) as described in the [MCP Server documentation](formulite/mcp/README.md).
+
+## 🔒 Security
+
+| Measure | Detail |
+|---------|--------|
+| **No `eval()` / `exec()`** | Expression evaluators (`evaluate_expression`, `scientific_calculate`) use AST-based parsing with whitelisted operations only |
+| **No OS command execution** | `subprocess` and OS shell access are not used anywhere in the library |
+| **`apply_expression` sandboxed** | Attribute access restricted to built-in types; private attributes (`_`-prefixed) blocked |
+| **DoS protection** | `factorial()` capped at n ≤ 170; exponents capped at ≤ 10,000; expression length capped at 1,000 chars |
+| **No auto-install** | Missing optional dependencies are reported via logging — the library never installs packages |
 
 ## 🤝 Contributing
 

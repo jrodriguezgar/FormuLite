@@ -1081,47 +1081,6 @@ class Test_drop_from_array:
             pass
 
 
-class Test_execute_os_command:
-    def test_exists(self):
-        assert hasattr(mod, "execute_os_command")
-
-    def test_doc0(self):
-        try:
-            mod.execute_os_command(["echo", "Hello from Python!"])
-        except EXC:
-            pass
-
-    def test_doc1(self):
-        try:
-            mod.execute_os_command(["cmd.exe", "/c", "echo", "Hello from Python!"])
-        except EXC:
-            pass
-
-    def test_doc2(self):
-        try:
-            mod.execute_os_command("nonexistent_command")
-        except EXC:
-            pass
-
-    def test_var0(self):
-        try:
-            mod.execute_os_command("hello")
-        except EXC:
-            pass
-
-    def test_var1(self):
-        try:
-            mod.execute_os_command("")
-        except EXC:
-            pass
-
-    def test_var2(self):
-        try:
-            mod.execute_os_command(None)
-        except EXC:
-            pass
-
-
 class Test_expand_array:
     def test_exists(self):
         assert hasattr(mod, "expand_array")

@@ -206,8 +206,6 @@ The `fxVBA` module provides VBA-compatible functions for FormuLite. These functi
 - [FileDateTime](#filedatetime) - Returns modification datetime of file
 - [FileLen](#filelen) - Returns size of file in bytes
 - [GetAttr_](#getattr_) - Returns attributes of file
-- [InputBox](#inputbox) - Displays dialog box for user input
-- [MsgBox](#msgbox) - Displays message box
 - [Nz](#nz) - Returns value if not null, otherwise returns alternative
 - [Partition](#partition) - Returns range string where number falls
 - [TypeName](#typename) - Returns string describing variable type
@@ -290,7 +288,6 @@ The `fxVBA` module provides VBA-compatible functions for FormuLite. These functi
 
 **I**
 - [IIf](#iif) - Returns one of two values based on condition
-- [InputBox](#inputbox) - Displays dialog box for user input
 - [InStr](#instr) - Finds position of substring within string
 - [InStrRev](#instrrev) - Finds position of substring searching from end
 - [Int_](#int_) - Returns integer part truncating toward negative infinity
@@ -331,7 +328,6 @@ The `fxVBA` module provides VBA-compatible functions for FormuLite. These functi
 - [MIRR](#mirr) - Returns modified internal rate of return
 - [Month](#month) - Returns month from date
 - [MonthName](#monthname) - Returns name of month
-- [MsgBox](#msgbox) - Displays message box
 
 **N**
 - [Now](#now) - Returns current date and time
@@ -2726,55 +2722,6 @@ if attr & 2:  # VbHidden
 ```
 
 **Cost:** O(1) llamada al sistema
-
----
-
-### InputBox
-
-Muestra un cuadro de diálogo de entrada y devuelve el texto ingresado.
-
-**Parameters:**
-- `prompt` (str): Mensaje a mostrar
-- `title` (str, default=""): Título del cuadro de diálogo
-- `default` (str, default=""): Valor predeterminado
-
-**Returns:**
-- `str`: Texto ingresado por el usuario
-
-**Example:**
-```python
-name = InputBox("Enter your name:", "User Input", "John Doe")
-print(f"Hello, {name}!")
-```
-
-**Cost:** O(1) + tiempo de interacción del usuario
-
----
-
-### MsgBox
-
-Muestra un cuadro de mensaje y devuelve la respuesta del usuario.
-
-**Parameters:**
-- `prompt` (str): Mensaje a mostrar
-- `buttons` (int, default=0): Combinación de constantes de botones
-- `title` (str, default=""): Título del cuadro de diálogo
-
-**Returns:**
-- `int`: Código del botón presionado
-
-**Example:**
-```python
-# Simple message
-MsgBox("Operation completed!")
-
-# Yes/No question
-result = MsgBox("Continue?", 4, "Confirmation")  # 4 = vbYesNo
-if result == 6:  # vbYes
-    print("User clicked Yes")
-```
-
-**Cost:** O(1) + tiempo de interacción del usuario
 
 ---
 

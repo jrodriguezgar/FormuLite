@@ -5883,6 +5883,9 @@ def poisson_probability(
     if lam <= 0:
         raise ValueError("lam must be positive.")
 
+    if k > 170:
+        raise ValueError(f"k={k} exceeds maximum supported for factorial (170).")
+
     return float(math.exp(-lam) * lam ** k / math.factorial(k))
 
 
@@ -6381,6 +6384,9 @@ def erlang_pdf(
 
     if x == 0:
         return float(lam) if k == 1 else 0.0
+
+    if k - 1 > 170:
+        raise ValueError(f"k={k} exceeds maximum supported for factorial (170).")
 
     return float(
         lam ** k * x ** (k - 1) * math.exp(-lam * x)
@@ -9688,6 +9694,10 @@ def poisson_pmf(
         raise ValueError("k must be non-negative.")
     if lam <= 0:
         raise ValueError("lam must be positive.")
+
+    if k > 170:
+        raise ValueError(f"k={k} exceeds maximum supported for factorial (170).")
+
     return float(lam ** k * math.exp(-lam) / math.factorial(k))
 
 
@@ -10236,6 +10246,12 @@ def multinomial_coefficient(*counts: int) -> int:
         if c < 0:
             raise ValueError("All counts must be non-negative.")
         total += c
+
+    if total > 170:
+        raise ValueError(
+            f"Sum of counts ({total}) exceeds maximum factorial input (170)."
+        )
+
     result = math.factorial(total)
     for c in counts:
         result //= math.factorial(c)

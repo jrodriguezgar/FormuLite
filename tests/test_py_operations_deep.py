@@ -567,44 +567,6 @@ class Test_collection_stdev_deep:
             pass
 
 
-class Test_execute_os_command_deep:
-    def test_c0(self):
-        try:
-            mod.execute_os_command([1, 2, 3, 4, 5])
-        except EXC:
-            pass
-
-    def test_c1(self):
-        try:
-            mod.execute_os_command([10, 20, 30])
-        except EXC:
-            pass
-
-    def test_c2(self):
-        try:
-            mod.execute_os_command([0, 1])
-        except EXC:
-            pass
-
-    def test_c3(self):
-        try:
-            mod.execute_os_command([-3, -1, 0, 2, 5])
-        except EXC:
-            pass
-
-    def test_c4(self):
-        try:
-            mod.execute_os_command([100])
-        except EXC:
-            pass
-
-    def test_c5(self):
-        try:
-            mod.execute_os_command([1, 1, 2, 3, 5, 8])
-        except EXC:
-            pass
-
-
 class Test_unique_tuple_list_deep:
     def test_c0(self):
         try:

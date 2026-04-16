@@ -2567,7 +2567,6 @@ module.function_name(param1, param2, ...) -> description
 - \dictionary_filter_by_keys(input_dict: object, keys_to_include: array)\ - Filters a dictionary, returning a new dictionary with only the specified keys.
 - \dictionary_rename_keys(original_dict: object, key_mapping: object)\ - Renames keys in a dictionary based on a provided mapping.
 - \drop_from_array(array: array, rows: integer = 0, columns: integer = 0)\ - Drops rows and/or columns from a 2-D array.
-- \execute_os_command(command: string)\ - Executes a command in the underlying operating system and captures its output.
 - \expand_array(array: array, rows: integer = None, columns: integer = None, pad_with: any = None)\ - Expand a 2-D array to target dimensions, padding new cells.
 - \filter_elements_by_another(main_collection: any, filter_criteria: any, return_type: string = list)\ - Filters elements from a main collection that are also present in a filter criteria collection.
 - \find(predicate: any, iterable: any, default: any = None)\ - Returns the first element matching a predicate.
@@ -2610,7 +2609,7 @@ module.function_name(param1, param2, ...) -> description
 
 ## fxPython.py_tools
 
-- \apply_expression(expression: string, iterable: any)\ - Applies a string expression to every item in an iterable and returns a list.
+- \apply_expression(expression: string, iterable: any)\ - Applies a string expression to every item in an iterable and returns a list. Attribute access restricted to built-in types; private attributes blocked.
 - \create_key_value_dictionary(p_key_columns: any, p_values: any)\ - Creates a dictionary by mapping key column names to their corresponding values.
 - \function_call(func: any, args: array = ..., kwargs: any)\ - Higher-order function that executes a callable with optional arguments.
 - \loop_for(iterable: any, func: any)\ - Executes a function for each item in an iterable, simulating a for loop.
@@ -3095,7 +3094,6 @@ module.function_name(param1, param2, ...) -> description
 ## fxVBA.misc_functions
 
 - \AccessError(error_number: integer)\ - Description
-- \CallByName(obj: any, proc_name: string, call_type: integer, args: array = ...)\ - Description
 - \CurrentUser()\ - Description
 - \Eval_(expression: string)\ - Description
 - \Hex_(number: integer)\ - Description
@@ -3144,8 +3142,6 @@ module.function_name(param1, param2, ...) -> description
 - \FileDateTime(pathname: string)\ - Description
 - \FileLen(pathname: string)\ - Description
 - \GetAttr_(pathname: string)\ - Description
-- \InputBox(prompt: string, title: string = , default: string = , xpos: integer = None, ypos: integer = None, helpfile: string = , context: integer = 0)\ - Description
-- \MsgBox(prompt: string, buttons: integer = 0, title: string = , helpfile: string = , context: integer = 0)\ - Description
 - \Nz(value: any, value_null: any = )\ - Description
 - \Partition(number: number, start: number, stop: number, interval: number)\ - Description
 - \TypeName(value: any)\ - Description

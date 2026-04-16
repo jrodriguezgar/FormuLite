@@ -21,8 +21,6 @@ __all__ = [
     "FileDateTime",
     "FileLen",
     "GetAttr_",
-    "InputBox",
-    "MsgBox",
     "Nz",
     "Partition",
     "TypeName",
@@ -238,73 +236,6 @@ def GetAttr_(pathname: str) -> int:
         attrs |= 16
     
     return attrs
-
-
-def InputBox(
-    prompt: str,
-    title: str = "",
-    default: str = "",
-    xpos: int = None,
-    ypos: int = None,
-    helpfile: str = "",
-    context: int = 0
-) -> str:
-    """
-    Description
-        Muestra cuadro de diálogo para solicitar datos (simulado con input).
-
-    Args
-        prompt: Texto del mensaje.
-        title: Título del cuadro.
-        default: Valor por defecto.
-        xpos: Posición X (ignorado en Python).
-        ypos: Posición Y (ignorado en Python).
-        helpfile: Archivo de ayuda (ignorado).
-        context: Contexto de ayuda (ignorado).
-
-    Returns
-        str: Texto ingresado.
-
-    Usage Example
-        >>> inputbox("Ingrese nombre:")
-        'Juan'
-
-    Cost
-        O(1)
-    """
-    return input(f"{prompt} [{default}]: ") or default
-
-
-def MsgBox(
-    prompt: str,
-    buttons: int = 0,
-    title: str = "",
-    helpfile: str = "",
-    context: int = 0
-) -> int:
-    """
-    Description
-        Muestra cuadro de mensaje (simulado con print, retorna siempre OK).
-
-    Args
-        prompt: Cuerpo del mensaje.
-        buttons: Estilo del MsgBox.
-        title: Título.
-        helpfile: Archivo de ayuda (ignorado).
-        context: Contexto (ignorado).
-
-    Returns
-        int: Valor del botón pulsado (1=OK siempre).
-
-    Usage Example
-        >>> msgbox("Operación exitosa")
-        1
-
-    Cost
-        O(1)
-    """
-    print(f"{title}\n{prompt}")
-    return 1
 
 
 def Nz(value: any, value_null: any = "") -> any:

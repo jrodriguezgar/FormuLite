@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+---
+
+## [0.2.1][0.2.1] — 2026-04-16
+
+Security hardening release: remove all `subprocess` usage, unsafe dispatch functions, and interactive I/O from library code. Add Python 3.10/3.11 compatibility fix and CI coverage enforcement.
+
+### Security
+
+- Remove `execute_os_command` function from `py_operations.py` — a function library must not execute OS commands
+- Remove `subprocess`-based auto-installation from `string_similarity.py` — `_lazy_import` now only attempts `importlib.import_module` and logs install instructions on failure
+- Add `_safe_factorial` with `_MAX_FACTORIAL=170` guard in `calculator_functions.py` to prevent DoS via expensive factorial computations
+- Restrict `ast.Attribute` access in `apply_expression()` (`py_tools.py`) to safe built-in types (`str`, `int`, `float`, `bool`, `list`, `tuple`, `dict`, `set`) and block private attribute access (`_`-prefixed)
+- Add `n > 170` upper-bound guard to `factorial()` and `multinomial_coefficient()` in `arithmetic_functions.py`, and to `poisson_probability()`, `erlang_pdf()`, `poisson_pmf()`, `multinomial_coefficient()` in `statistics_functions.py` — aligns with existing `_MAX_FACTORIAL=170` in `calculator_functions.py`
+- Remove `CallByName()` — exposed unrestricted `getattr`/`setattr` on arbitrary objects via MCP
+- Remove `MsgBox()` and `InputBox()` from `fxVBA/system_functions.py` — interactive I/O (`print`/`input`) has no place in a pure function library
+
+### Fixed
+
+- Add Python 3.10/3.11 compatibility shims for `itertools.batched` and `math.sumprod` in `py_itertools.py` (were Python 3.12+ only)
+
+### Removed
+
+- `execute_os_command()` from `fxPython.py_operations` (security: no OS command execution in a function library)
+- `_is_uv_managed_environment()`, `_find_pyproject_dir()`, `_validate_package_name()`, `_install_library()` and all `subprocess` auto-install strategies from `fxString.string_similarity`
+- `FORMULITE_AUTO_INSTALL` / `ALLOW_AUTO_INSTALL` environment variables (no longer needed — library never installs packages)
+- `CallByName()` from `fxVBA.misc_functions` (unrestricted `getattr`/`setattr` dispatch not appropriate for a formula library)
+
+### Changed
+
+- `.gitignore` — add patterns for secrets, credentials, IDE, OS, database files
+- CI (`ci.yml`) — add `pytest-cov` with `--cov-fail-under=80`, `uv lock --check`, and `pip-audit` steps
+- `pyproject.toml` — add `pytest-cov>=6.0.0` to dev dependencies
+
+---
+
 ## [0.2.0][0.2.0] — 2026-04-13
 
 Massive architecture overhaul: introduce `auto_export` dynamic re-export system, shared validators, AI agent integration layer (registry + MCP server + semantic search), and expand the library from ~580 to 3 000+ functions. All `fx*` packages now use `_loader.auto_export()`. The `fxNumeric` module is reorganised from 6 files into 30+ domain-specific submodules. New `fxString` submodules for encoding, hashing, compression, regex, and case conversion. All existing modules receive significant function additions and improved docstrings with Google-style format.

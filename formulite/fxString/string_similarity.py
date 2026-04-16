@@ -1,158 +1,79 @@
-import sys
-import os
-import importlib
-import subprocess
 import difflib
+import importlib
 import logging
 from collections import deque
-from typing import Union, List, Dict, Any, Tuple, Optional, Literal
+from types import ModuleType
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 _logger = logging.getLogger(__name__)
 
-
-_lazy_loaded_modules = {}
-
-# Type alias para los algoritmos disponibles
+# Type alias for available algorithms
 AlgorithmType = Literal[
     'metaphone', 'levenshtein', 'hamming', 'ratcliff_obershelp',
     'sorensen_dice', 'mra', 'needleman_wunsch', 'jaro_winkler',
     'jaccard', 'lcs'
 ]
 
-
-def _is_uv_managed_environment() -> bool:
-    """Check if the current Python environment is managed by uv."""
-    # Check if running via 'uv run' (UV_PROJECT_ENVIRONMENT is set)
-    if os.environ.get('UV_PROJECT_ENVIRONMENT'):
-        return True
-    # Check if python is in uv's managed path
-    if 'uv' in sys.executable.lower():
-        return True
-    # Check pyvenv.cfg in the venv directory (from executable path)
-    exe_dir = os.path.dirname(sys.executable)
-    venv_dir = os.path.dirname(exe_dir)
-    pyvenv_cfg = os.path.join(venv_dir, 'pyvenv.cfg')
-    if os.path.exists(pyvenv_cfg):
-        try:
-            with open(pyvenv_cfg, 'r') as f:
-                content = f.read()
-                if 'uv =' in content or 'uv=' in content:
-                    return True
-        except Exception:
-            pass
-    # Fallback: Check VIRTUAL_ENV environment variable
-    venv = os.environ.get('VIRTUAL_ENV', '')
-    if venv and os.path.exists(os.path.join(venv, 'pyvenv.cfg')):
-        try:
-            with open(os.path.join(venv, 'pyvenv.cfg'), 'r') as f:
-                content = f.read()
-                if 'uv =' in content or 'uv=' in content:
-                    return True
-        except Exception:
-            pass
-    return False
+# ── Optional dependency metadata ─────────────────────────────────────
+# Map: import name → PyPI install instruction shown on failure.
+_OPTIONAL_PACKAGES: dict[str, str] = {
+    "textdistance": "pip install textdistance",
+    "metaphone": "pip install metaphone",
+    "Levenshtein": "pip install python-Levenshtein",
+    "jellyfish": "pip install jellyfish",
+}
 
 
-def _find_pyproject_dir() -> str:
-    """Find the directory containing pyproject.toml."""
-    current = os.getcwd()
-    while current != os.path.dirname(current):
-        if os.path.exists(os.path.join(current, 'pyproject.toml')):
-            return current
-        current = os.path.dirname(current)
-    return None
+# ── Module-level cache ───────────────────────────────────────────────
+_lazy_loaded_modules: dict[str, ModuleType | None] = {}
 
 
-def _lazy_import(module_name: str, package_name: str = None):
-    """
-    Intenta importar un módulo de forma perezosa. Si el módulo no está
-    disponible, intenta instalarlo con uv o pip. Si falla, retorna None.
+def _lazy_import(
+    module_name: str,
+    package_name: str | None = None,
+) -> ModuleType | None:
+    """Import a module lazily; log install instructions on failure.
+
+    Only attempts ``importlib.import_module``. Never installs packages
+    automatically.
 
     Args:
-        module_name (str): El nombre del módulo a importar (ej. 'metaphone').
-        package_name (str): El nombre del paquete para la instalación de pip
-                            si es diferente al module_name (ej. 'python-Levenshtein').
-                            Si es None, se usa module_name.
+        module_name: The module to import (e.g. ``'metaphone'``).
+        package_name: Unused, kept for backwards compatibility.
 
     Returns:
-        module: El módulo importado, o None si no está disponible.
+        The imported module, or ``None`` if it is not available.
+
+    Complexity: O(1) after first successful call (cached).
     """
-    if module_name in _lazy_loaded_modules:
-        return _lazy_loaded_modules[module_name]
+    cached = _lazy_loaded_modules.get(module_name)
+    if cached is not None:
+        return cached
 
     try:
         module = importlib.import_module(module_name)
         _lazy_loaded_modules[module_name] = module
         return module
     except ImportError:
-        install_name = package_name if package_name else module_name
-        _logger.warning("Library '%s' is not installed.", module_name)
-        
-        installed = False
-        
-        # Strategy 1: uv add (for uv-managed projects with pyproject.toml)
-        if _is_uv_managed_environment():
-            project_dir = _find_pyproject_dir()
-            if project_dir:
-                _logger.info("Attempting install: uv add %s", install_name)
-                try:
-                    subprocess.check_call(["uv", "add", install_name], cwd=project_dir)
-                    installed = True
-                except (subprocess.CalledProcessError, FileNotFoundError):
-                    pass
-            
-            # Strategy 2: uv pip install (for uv without pyproject.toml)
-            if not installed:
-                _logger.info("Attempting install: uv pip install %s", install_name)
-                try:
-                    subprocess.check_call(["uv", "pip", "install", install_name, "--python", sys.executable])
-                    installed = True
-                except (subprocess.CalledProcessError, FileNotFoundError):
-                    pass
-        
-        # Strategy 3: Standard pip
-        if not installed:
-            _logger.info("Attempting install: pip install %s", install_name)
-            try:
-                subprocess.check_call([sys.executable, "-m", "pip", "install", install_name])
-                installed = True
-            except subprocess.CalledProcessError:
-                # Strategy 4: pip with --break-system-packages (PEP 668)
-                try:
-                    subprocess.check_call([sys.executable, "-m", "pip", "install", install_name, "--break-system-packages"])
-                    installed = True
-                except subprocess.CalledProcessError:
-                    pass
-        
-        if installed:
-            # CRITICAL: Refresh finder caches
-            importlib.invalidate_caches()
-            
-            # Clear module from sys.modules if cached as failed
-            if module_name in sys.modules:
-                del sys.modules[module_name]
-            to_remove = [key for key in sys.modules if key.startswith(module_name + '.')]
-            for key in to_remove:
-                del sys.modules[key]
-            
-            try:
-                module = importlib.import_module(module_name)
-                _lazy_loaded_modules[module_name] = module
-                _logger.info("'%s' installed and '%s' loaded.", install_name, module_name)
-                return module
-            except ImportError as e:
-                _logger.error("'%s' installed but import '%s' failed: %s", install_name, module_name, e)
-                _lazy_loaded_modules[module_name] = None
-                return None
-        else:
-            _logger.error(
-                "Could not install '%s' automatically. Install manually with: "
-                "uv add %s | uv pip install %s --python %s | %s -m pip install %s",
-                install_name, install_name, install_name,
-                sys.executable, sys.executable, install_name,
-            )
-            _lazy_loaded_modules[module_name] = None
-            return None
+        install_hint = _OPTIONAL_PACKAGES.get(module_name, f"pip install {module_name}")
+        _logger.warning(
+            "Optional package '%s' is not installed. "
+            "Install it with: %s",
+            module_name,
+            install_hint,
+        )
+        return None
+
+
+def _require_textdistance() -> ModuleType:
+    """Return the ``textdistance`` module or raise ``ImportError``."""
+    td = _lazy_import("textdistance")
+    if td is None:
+        raise ImportError(
+            "textdistance is required for this function. "
+            "Install it with: pip install textdistance"
+        )
+    return td
 
 
 def calculate_similarity(
@@ -325,10 +246,10 @@ def calculate_similarity(
         return ws.metaphone_score(word1, word2)
 
     elif algorithm == 'levenshtein':
-        return ws.string_levenshtein_score(word1, word2)
+        return ws.levenshtein_score(word1, word2)
 
     elif algorithm == 'hamming':
-        return ws.string_hamming_score(word1, word2)
+        return ws.hamming_score(word1, word2)
 
     elif algorithm == 'ratcliff_obershelp':
         return ws.ratcliff_obershelp_score(word1, word2)
@@ -337,7 +258,7 @@ def calculate_similarity(
         return ws.sorensen_dice_score(word1, word2)
 
     elif algorithm == 'mra':
-        return ws.string_mra_score(word1, word2)
+        return ws.mra_score(word1, word2)
 
     elif algorithm == 'needleman_wunsch':
         return ws.needleman_wunsch_score(word1, word2)
@@ -346,10 +267,10 @@ def calculate_similarity(
         return ws.jaro_winkler_score(word1, word2)
 
     elif algorithm == 'jaccard':
-        return ws.string_jaccard_score(word1, word2)
+        return ws.jaccard_score(word1, word2)
 
     elif algorithm == 'lcs':
-        return ws.string_lcs_score(word1, word2)
+        return ws.lcs_score(word1, word2)
 
     elif algorithm == 'effective_same':
         levenshtein_threshold = kwargs.get('levenshtein_threshold', 0.85)
@@ -437,7 +358,7 @@ class WordSimilarity:
         """
         if not isinstance(nw_gap_cost, int) or nw_gap_cost < 0:
             raise ValueError("nw_gap_cost debe ser un entero no negativo.")
-        td = _lazy_import('textdistance') # Importación perezosa
+        td = _require_textdistance()  # Lazy import
         td.needleman_wunsch.gap_cost = nw_gap_cost
 
     @staticmethod
@@ -473,12 +394,12 @@ class WordSimilarity:
         if word1 == word2:
             return True
         
-        metaphone = _lazy_import('metaphone') # Importación perezosa
+        metaphone = _lazy_import('metaphone')  # Lazy import
         if metaphone is None:
-            # Fallback: si metaphone no está disponible, usar comparación simple
+            # Fallback: if metaphone is not available, use simple comparison
             return word1.lower() == word2.lower()
-        meta1 = metaphone.doublemetaphone(word1.lower()) # Convertir a minúsculas para consistencia
-        meta2 = metaphone.doublemetaphone(word2.lower()) # Convertir a minúsculas para consistencia
+        meta1 = metaphone.doublemetaphone(word1.lower())  # Normalize to lowercase
+        meta2 = metaphone.doublemetaphone(word2.lower())  # Normalize to lowercase
         return any(m in meta2 for m in meta1 if m)
 
     @staticmethod
@@ -517,7 +438,12 @@ class WordSimilarity:
         if word1 == word2:
             return 1.0
         
-        Levenshtein = _lazy_import('Levenshtein', 'python-Levenshtein') # Importación perezosa
+        Levenshtein = _lazy_import('Levenshtein', 'python-Levenshtein')  # Lazy import
+        if Levenshtein is None:
+            raise ImportError(
+                "python-Levenshtein is required for this function. "
+                "Install it with: pip install python-Levenshtein"
+            )
         return Levenshtein.ratio(word1, word2)
 
     @staticmethod
@@ -562,9 +488,9 @@ class WordSimilarity:
             raise ValueError("Para Hamming, ambas palabras deben tener la misma longitud.")
         if not word1: # Si ambas son cadenas vacías, la distancia es 0, similitud 1.0
             return 1.0
-        jellyfish = _lazy_import('jellyfish') # Importación perezosa
+        jellyfish = _lazy_import('jellyfish')  # Lazy import
         if jellyfish is None:
-            # Fallback: calcular distancia de Hamming manualmente
+            # Fallback: compute Hamming distance manually
             dist = sum(c1 != c2 for c1, c2 in zip(word1, word2))
         else:
             dist = jellyfish.hamming_distance(word1, word2)
@@ -598,7 +524,7 @@ class WordSimilarity:
         """
         if not isinstance(a, str) or not isinstance(b, str):
             raise TypeError("Ambos argumentos deben ser cadenas de texto.")
-        td = _lazy_import('textdistance') # Importación perezosa
+        td = _require_textdistance()  # Lazy import
         d = td.ratcliff_obershelp
         return {
             'distance': d.distance(a, b),
@@ -638,8 +564,8 @@ class WordSimilarity:
         """
         if not isinstance(a, str) or not isinstance(b, str):
             raise TypeError("Ambos argumentos deben ser cadenas de texto.")
-        tokens_a, tokens_b = a.lower().split(), b.lower().split() # Convertir a minúsculas y tokenizar
-        td = _lazy_import('textdistance') # Importación perezosa
+        tokens_a, tokens_b = a.lower().split(), b.lower().split()  # Lowercase and tokenize
+        td = _require_textdistance()  # Lazy import
         d = td.sorensen
         return {
             'distance': d.distance(tokens_a, tokens_b),
@@ -677,7 +603,7 @@ class WordSimilarity:
         """
         if not isinstance(a, str) or not isinstance(b, str):
             raise TypeError("Ambos argumentos deben ser cadenas de texto.")
-        td = _lazy_import('textdistance') # Importación perezosa
+        td = _require_textdistance()  # Lazy import
         d = td.mra
         return {
             'distance': d.distance(a, b),
@@ -716,7 +642,7 @@ class WordSimilarity:
         """
         if not isinstance(a, str) or not isinstance(b, str):
             raise TypeError("Ambos argumentos deben ser cadenas de texto.")
-        td = _lazy_import('textdistance') # Importación perezosa
+        td = _require_textdistance()  # Lazy import
         d = td.needleman_wunsch
         return {
             'distance': d.distance(a, b),
@@ -754,7 +680,7 @@ class WordSimilarity:
         """
         if not isinstance(a, str) or not isinstance(b, str):
             raise TypeError("Ambos argumentos deben ser cadenas de texto.")
-        td = _lazy_import('textdistance') # Importación perezosa
+        td = _require_textdistance()  # Lazy import
         d = td.jaro_winkler
         return {
             'distance': d.distance(a, b),
@@ -793,8 +719,8 @@ class WordSimilarity:
         """
         if not isinstance(a, str) or not isinstance(b, str):
             raise TypeError("Ambos argumentos deben ser cadenas de texto.")
-        tokens_a, tokens_b = a.lower().split(), b.lower().split() # Convertir a minúsculas y tokenizar
-        td = _lazy_import('textdistance') # Importación perezosa
+        tokens_a, tokens_b = a.lower().split(), b.lower().split()  # Lowercase and tokenize
+        td = _require_textdistance()  # Lazy import
         d = td.jaccard
         return {
             'distance': d.distance(tokens_a, tokens_b),
@@ -1409,7 +1335,7 @@ def string_hamming_score(a: str, b: str) -> Dict[str, float]:
     Cost:
         $O(n)$ where n is the length of the strings.
     """
-    td = _lazy_import('textdistance')
+    td = _require_textdistance()
     return {
         "distance": td.hamming.distance(a, b),
         "similarity": td.hamming.normalized_similarity(a, b),
@@ -1444,11 +1370,11 @@ def string_mra_score(a: str, b: str) -> Dict[str, float]:
     Cost:
         $O(n + m)$ where n and m are the lengths of the strings.
     """
-    td = _lazy_import('textdistance')
+    td = _require_textdistance()
     return {
         "distance": td.mra.distance(a, b),
         "similarity": td.mra.normalized_similarity(a, b),
-        "score": 100.0 * td.mra.normalizsed_similarity(a, b)
+        "score": 100.0 * td.mra.normalized_similarity(a, b)
     }
 
 
@@ -1481,7 +1407,7 @@ def string_sorensendice_score(a: str, b: str) -> Dict[str, float]:
     Cost:
         $O(n + m)$ where n and m are the number of tokens.
     """
-    td = _lazy_import('textdistance')
+    td = _require_textdistance()
     a_tokens = a.split()
     b_tokens = b.split()
     return {
@@ -1518,7 +1444,7 @@ def string_levenshtein_score(a: str, b: str) -> Dict[str, float]:
     Cost:
         $O(m \\times n)$ where m and n are the lengths of the strings.
     """
-    td = _lazy_import('textdistance')
+    td = _require_textdistance()
     return {
         "distance": td.levenshtein.distance(a, b),
         "similarity": td.levenshtein.normalized_similarity(a, b),
@@ -1556,7 +1482,7 @@ def string_dna_score(a: str, b: str) -> Dict[str, float]:
     Cost:
         $O(m \\times n)$ where m and n are the lengths of the sequences.
     """
-    td = _lazy_import('textdistance')
+    td = _require_textdistance()
     td.needleman_wunsch.gap_cost = 1
     return {
         "distance": td.needleman_wunsch.distance(a, b),
@@ -1595,7 +1521,7 @@ def string_jarowinkler_score(a: str, b: str) -> Dict[str, float]:
     Cost:
         $O(m \\times n)$ where m and n are the lengths of the strings.
     """
-    td = _lazy_import('textdistance')
+    td = _require_textdistance()
     return {
         "distance": td.jaro_winkler.distance(a, b),
         "similarity": td.jaro_winkler.normalized_similarity(a, b),
@@ -1633,7 +1559,7 @@ def string_jaccard_score(a: str, b: str) -> Dict[str, float]:
     Cost:
         $O(n + m)$ where n and m are the number of tokens.
     """
-    td = _lazy_import('textdistance')
+    td = _require_textdistance()
     a_tokens = a.split()
     b_tokens = b.split()
     return {
@@ -1674,7 +1600,7 @@ def string_ratcliffobershelp_score(a: str, b: str) -> Dict[str, float]:
     Cost:
         $O(m \\times n)$ in the average case, can be slower for complex patterns.
     """
-    td = _lazy_import('textdistance')
+    td = _require_textdistance()
     return {
         "distance": td.ratcliff_obershelp.distance(a, b),
         "similarity": td.ratcliff_obershelp.normalized_similarity(a, b),

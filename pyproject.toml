@@ -1,6 +1,6 @@
 [project]
 name = "formulite"
-version = "0.2.0"
+version = "0.2.1"
 description = "A Python library for high-level functions similar to Excel formulas"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -73,6 +73,7 @@ dev = [
     "build>=1.2.0",
     "hatchling>=1.25.0",
     "pytest>=8.0.0",
+    "pytest-cov>=6.0.0",
     "pytest-timeout>=2.4.0",
 ]
 

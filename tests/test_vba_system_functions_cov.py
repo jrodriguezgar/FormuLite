@@ -202,52 +202,6 @@ class Test_GetAttr_:
             pass
 
 
-class Test_InputBox:
-    def test_exists(self):
-        assert hasattr(mod, "InputBox")
-
-    def test_var0(self):
-        try:
-            mod.InputBox("hello")
-        except EXC:
-            pass
-
-    def test_var1(self):
-        try:
-            mod.InputBox("")
-        except EXC:
-            pass
-
-    def test_var2(self):
-        try:
-            mod.InputBox(None)
-        except EXC:
-            pass
-
-
-class Test_MsgBox:
-    def test_exists(self):
-        assert hasattr(mod, "MsgBox")
-
-    def test_var0(self):
-        try:
-            mod.MsgBox("hello")
-        except EXC:
-            pass
-
-    def test_var1(self):
-        try:
-            mod.MsgBox("")
-        except EXC:
-            pass
-
-    def test_var2(self):
-        try:
-            mod.MsgBox(None)
-        except EXC:
-            pass
-
-
 class Test_Nz:
     def test_exists(self):
         assert hasattr(mod, "Nz")

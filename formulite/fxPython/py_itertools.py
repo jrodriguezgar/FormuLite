@@ -17,15 +17,34 @@ Based on: https://docs.python.org/3/library/itertools.html
 # itertools recipes
 # https://docs.python.org/3/library/itertools.html
 
+import sys
 from collections import deque
 from contextlib import suppress
 from functools import reduce
 from itertools import (
-    accumulate, batched, chain, combinations, count, cycle, filterfalse,
+    accumulate, chain, combinations, count, cycle, filterfalse,
     groupby, islice, product, repeat, starmap, zip_longest
 )
-from math import comb, isqrt, prod, sumprod
+from math import comb, isqrt, prod
 from operator import getitem, itemgetter, mul, neg
+
+if sys.version_info >= (3, 12):
+    from itertools import batched
+    from math import sumprod
+else:
+    def batched(iterable, n, *, strict=False):
+        """Batch data into tuples of length *n*. The last batch may be shorter."""
+        if n < 1:
+            raise ValueError("n must be at least one")
+        it = iter(iterable)
+        while batch := tuple(islice(it, n)):
+            if strict and len(batch) != n:
+                raise ValueError("batched(): incomplete batch")
+            yield batch
+
+    def sumprod(p, q):
+        """Return the sum of products of values from two iterables."""
+        return sum(a * b for a, b in zip(p, q))
 
 def take(n, iterable):
     """

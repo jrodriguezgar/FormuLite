@@ -173,6 +173,45 @@ cython_debug/
 # Learn more at https://abstra.io/docs
 .abstra/
 
+# ── Secrets & credentials ────────────────────────────────────────────
+.env.*
+**/*key*.txt
+**/*key*.csv
+**/*secret*
+**/*credential*
+**/apikey*
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.truststore
+apikeys.csv
+*.tfvars
+*.auto.tfvars
+id_rsa
+id_dsa
+id_ecdsa
+id_ed25519
+
+# ── Database ─────────────────────────────────────────────────────────
+*.sqlite
+*.db
+
+# ── IDE ──────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+
+# ── OS ───────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Project-specific ─────────────────────────────────────────────────
+pytest_output.txt
+ToDo/
+
 # Visual Studio Code
 #  Visual Studio Code specific template is maintained in a separate VisualStudioCode.gitignore 
 #  that can be found at https://github.com/github/gitignore/blob/main/Global/VisualStudioCode.gitignore

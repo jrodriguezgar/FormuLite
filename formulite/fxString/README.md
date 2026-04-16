@@ -2285,6 +2285,8 @@ Extracts the domain portion from an email address.
 
 Functions for comparing strings and calculating similarity scores.
 
+> Some algorithms (Metaphone, Levenshtein, Jaro-Winkler) require optional third-party libraries. If missing, the library logs an install instruction and returns ``None``. FormuLite never installs packages automatically.
+
 ### calculate_similarity
 
 Calculates similarity between two strings using specified algorithm.
