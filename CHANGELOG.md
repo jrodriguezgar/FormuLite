@@ -9,11 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+---
+
+## [0.2.2][0.2.2] — 2026-04-21
+
+Documentation infrastructure release: add MkDocs Material site with auto-generated API reference and GitHub Pages deployment.
+
 ### Added
 
 - Add MkDocs Material documentation site with auto-generated API reference via mkdocstrings
 - Add GitHub Pages deployment workflow (`.github/workflows/docs.yml`)
 - Add `docs` dependency group in `pyproject.toml` (mkdocs-material, mkdocstrings, gen-files, literate-nav, section-index)
+
+### Fixed
+
+- Add `pymdownx.emoji` extension for Material icons rendering in MkDocs
 
 ---
 
@@ -503,6 +513,8 @@ Repository initialization with license and README.
 
 ---
 
-[Unreleased]: https://github.com/jrodriguezgar/FormuLite/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/jrodriguezgar/FormuLite/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/jrodriguezgar/FormuLite/compare/v0.2.1...v0.2.2
+[0.2.1]: https://github.com/jrodriguezgar/FormuLite/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/jrodriguezgar/FormuLite/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/jrodriguezgar/FormuLite/releases/tag/v0.1.0
